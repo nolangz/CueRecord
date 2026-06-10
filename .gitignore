@@ -1,0 +1,16 @@
+.DS_Store
+*.xcuserstate
+*.xcuserdata/
+xcuserdata/
+DerivedData/
+.build/
+build/
+ref/
+reports/
+*.log
+*.tmp
+*.swp
+*.xcarchive
+*.dmg
+*.zip
+*.tar.gz

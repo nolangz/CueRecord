@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>ATSApplicationFontsPath</key>
+	<string>.</string>
+	<key>NSAudioCaptureUsageDescription</key>
+	<string>CueRecord needs to capture system audio when recording your screen.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>CueRecord needs camera access for the recording camera overlay.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>CueRecord needs microphone access to include your voice in recordings and speech guidance.</string>
+	<key>NSScreenCaptureUsageDescription</key>
+	<string>CueRecord needs screen recording access to capture your screen while recording.</string>
+	<key>CFBundleDocumentTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>CueRecord Document</string>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>LSHandlerRank</key>
+			<string>Owner</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>com.nolanlai.cuerecord.document</string>
+				<string>com.nolanlai.cueshot.document</string>
+			</array>
+		</dict>
+	</array>
+	<key>UTExportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.json</string>
+				<string>public.data</string>
+			</array>
+			<key>UTTypeDescription</key>
+			<string>CueRecord Document</string>
+			<key>UTTypeIdentifier</key>
+			<string>com.nolanlai.cuerecord.document</string>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>cuerecord</string>
+				</array>
+			</dict>
+		</dict>
+	</array>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.nolanlai.cuerecord</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>cuerecord</string>
+				<string>takeone</string>
+				<string>cueshot</string>
+			</array>
+		</dict>
+	</array>
+	<key>NSServices</key>
+	<array>
+		<dict>
+			<key>NSMenuItem</key>
+			<dict>
+				<key>default</key>
+				<string>Read in CueRecord</string>
+			</dict>
+			<key>NSMessage</key>
+			<string>readInCueRecord</string>
+			<key>NSPortName</key>
+			<string>CueRecord</string>
+			<key>NSSendTypes</key>
+			<array>
+				<string>public.utf8-plain-text</string>
+			</array>
+		</dict>
+	</array>
+	<key>UTImportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.json</string>
+				<string>public.data</string>
+			</array>
+			<key>UTTypeDescription</key>
+			<string>Legacy CueRecord Document</string>
+			<key>UTTypeIdentifier</key>
+			<string>com.nolanlai.takeone.document</string>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>takeone</string>
+				</array>
+			</dict>
+		</dict>
+		<dict>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.json</string>
+				<string>public.data</string>
+			</array>
+			<key>UTTypeDescription</key>
+			<string>Legacy CueRecord Document</string>
+			<key>UTTypeIdentifier</key>
+			<string>com.nolanlai.cueshot.document</string>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>cueshot</string>
+				</array>
+			</dict>
+		</dict>
+	</array>
+</dict>
+</plist>
