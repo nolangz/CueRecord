@@ -27,6 +27,7 @@ struct ContentView: View {
     @State private var recordingPreviewBarWindow = RecordingPreviewBarWindow()
     @State private var hidesMainUIForRecordingPreview = false
     @State private var mainWindowsHiddenForRecordingPreview: [NSWindow] = []
+    @State private var isShowingPostRecordingOptions = false
     @State private var editingProjectURL: URL?
     @State private var editingProjectTitleText = ""
     @State private var editingPageTitleIndex: Int?
@@ -561,6 +562,13 @@ struct ContentView: View {
 	                finishRenamingPage()
 	            }
 	        }
+        .onChange(of: recordingController.hasPendingCapturedRecording) { _, hasPending in
+            if hasPending {
+                presentPostRecordingRenderOptions()
+            } else {
+                isShowingPostRecordingOptions = false
+            }
+        }
 	        .onAppear {
             service.prepareInitialDocument()
             // Sync button state with overlay
@@ -1215,25 +1223,38 @@ struct ContentView: View {
         }
     }
 
-    private func presentPostRecordingRenderOptions() {
+    private func presentPostRecordingRenderOptions(retryIfNeeded: Bool = true) {
         guard recordingController.hasPendingCapturedRecording else {
-            restoreMainUIAfterRecordingPreview(focusEditor: false)
+            if retryIfNeeded {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                    presentPostRecordingRenderOptions(retryIfNeeded: false)
+                }
+            } else {
+                restoreMainUIAfterRecordingPreview(focusEditor: false)
+            }
             return
         }
+        guard !isShowingPostRecordingOptions else { return }
 
+        isShowingPostRecordingOptions = true
         restoreMainUIAfterRecordingPreview(focusEditor: false)
-        recordingPreviewBarWindow.showRenderOptions(
-            controller: recordingController,
-            onDelete: {
-                recordingController.deletePendingCapturedRecording()
-            },
-            onRenderAll: {
-                recordingController.renderPendingCapturedRecording(mode: .all)
-            },
-            onRenderCameraOnly: {
-                recordingController.renderPendingCapturedRecording(mode: .cameraOnlyTransparent)
-            }
-        )
+        DispatchQueue.main.async {
+            recordingPreviewBarWindow.showRenderOptions(
+                controller: recordingController,
+                onDelete: {
+                    isShowingPostRecordingOptions = false
+                    recordingController.deletePendingCapturedRecording()
+                },
+                onRenderAll: {
+                    isShowingPostRecordingOptions = false
+                    recordingController.renderPendingCapturedRecording(mode: .all)
+                },
+                onRenderCameraOnly: {
+                    isShowingPostRecordingOptions = false
+                    recordingController.renderPendingCapturedRecording(mode: .cameraOnlyTransparent)
+                }
+            )
+        }
     }
 
     private func prepareRecordingOutputName() {
