@@ -1221,18 +1221,16 @@ struct ContentView: View {
             return
         }
 
+        restoreMainUIAfterRecordingPreview(focusEditor: false)
         recordingPreviewBarWindow.showRenderOptions(
             controller: recordingController,
             onDelete: {
                 recordingController.deletePendingCapturedRecording()
-                restoreMainUIAfterRecordingPreview(focusEditor: false)
             },
             onRenderAll: {
-                restoreMainUIAfterRecordingPreview(focusEditor: false)
                 recordingController.renderPendingCapturedRecording(mode: .all)
             },
             onRenderCameraOnly: {
-                restoreMainUIAfterRecordingPreview(focusEditor: false)
                 recordingController.renderPendingCapturedRecording(mode: .cameraOnlyTransparent)
             }
         )

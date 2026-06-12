@@ -373,6 +373,7 @@ final class RecordingController: ObservableObject {
         stopRecordingTimer()
         stopSelectedWindowTracking()
         recordingIndicator.hideIndicator()
+        let expectedOutputURL = recordingState.outputURL
         if let snapshot = circularCameraWindow?.metadataSnapshot() {
             recordingState.customCameraOverlayFrame = snapshot.frame
         }
@@ -389,8 +390,10 @@ final class RecordingController: ObservableObject {
 
             do {
                 pendingCapturedRecording = try await screenRecorder.stopRecording()
+                    ?? capturedRecordingOutput(for: expectedOutputURL)
             } catch {
                 lastError = error.localizedDescription
+                pendingCapturedRecording = capturedRecordingOutput(for: expectedOutputURL)
             }
 
             recordingState.stopRecording()
@@ -398,6 +401,21 @@ final class RecordingController: ObservableObject {
             isStopping = false
             runStopCompletionsIfNeeded()
         }
+    }
+
+    private func capturedRecordingOutput(for outputURL: URL) -> CapturedRecordingOutput? {
+        guard FileManager.default.fileExists(atPath: outputURL.path) else { return nil }
+
+        let basePath = outputURL.deletingPathExtension().path
+        let fileExtension = outputURL.pathExtension
+        let cameraURL = URL(fileURLWithPath: "\(basePath)_camera.\(fileExtension)")
+        let overlayURL = URL(fileURLWithPath: "\(basePath)_overlay.json")
+
+        return CapturedRecordingOutput(
+            outputURL: outputURL,
+            cameraURL: FileManager.default.fileExists(atPath: cameraURL.path) ? cameraURL : nil,
+            overlayMetadataURL: FileManager.default.fileExists(atPath: overlayURL.path) ? overlayURL : nil
+        )
     }
 
     func renderPendingCapturedRecording(mode: RecordingRenderMode) {
