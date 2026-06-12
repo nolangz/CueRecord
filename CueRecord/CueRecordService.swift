@@ -185,6 +185,35 @@ class CueRecordService: NSObject, ObservableObject {
         loadProject(at: currentProjectIndex)
     }
 
+    func renameProject(at index: Int, to title: String) {
+        guard index >= 0, index < projects.count else { return }
+        guard let vaultURL else { return }
+        persistAllPages()
+
+        let oldProjectURL = projects[index].url
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let nextTitle = trimmed.isEmpty ? "Untitled Project" : trimmed
+        let newProjectURL = uniqueProjectDirectory(in: vaultURL, title: nextTitle, excluding: oldProjectURL)
+
+        guard oldProjectURL.standardizedFileURL != newProjectURL.standardizedFileURL else {
+            refreshCurrentProjectMetadata()
+            return
+        }
+
+        do {
+            ignoreOwnVaultChanges()
+            try FileManager.default.moveItem(at: oldProjectURL, to: newProjectURL)
+            refreshProjects(selecting: newProjectURL)
+            guard let renamedProjectIndex = projects.firstIndex(where: { $0.url.standardizedFileURL == newProjectURL.standardizedFileURL }) else {
+                return
+            }
+            loadProject(at: renamedProjectIndex)
+        } catch {
+            showFileError(title: "Failed to rename project", error: error)
+            refreshProjects(selecting: oldProjectURL)
+        }
+    }
+
     func pageTitle(at index: Int) -> String {
         guard index >= 0, index < pages.count else { return "Untitled" }
         if index < pageTitles.count {
@@ -793,11 +822,16 @@ class CueRecordService: NSObject, ObservableObject {
         )) ?? [])
         .filter { url in
             let isDirectory = (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
-            return isDirectory
+            guard isDirectory else { return false }
+            return isProjectDirectory(url)
         }
         .sorted { lhs, rhs in
             lhs.lastPathComponent.localizedStandardCompare(rhs.lastPathComponent) == .orderedAscending
         }
+    }
+
+    private func isProjectDirectory(_ url: URL) -> Bool {
+        !markdownFiles(in: url).isEmpty
     }
 
     private func migrateLooseMarkdownFiles(in vaultURL: URL) throws {

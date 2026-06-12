@@ -27,11 +27,14 @@ struct ContentView: View {
     @State private var recordingPreviewBarWindow = RecordingPreviewBarWindow()
     @State private var hidesMainUIForRecordingPreview = false
     @State private var mainWindowsHiddenForRecordingPreview: [NSWindow] = []
+    @State private var editingProjectURL: URL?
+    @State private var editingProjectTitleText = ""
     @State private var editingPageTitleIndex: Int?
     @State private var editingPageTitleText = ""
     @State private var hoveredProjectURL: URL?
     @State private var hoveredMarkdownURL: URL?
     @FocusState private var isTextFocused: Bool
+    @FocusState private var focusedProjectURL: URL?
     @FocusState private var focusedPageTitleIndex: Int?
 
     private var currentText: Binding<String> {
@@ -622,8 +625,12 @@ struct ContentView: View {
 
             HStack(spacing: 8) {
                 Button {
+                    finishRenamingPage()
+                    finishRenamingProject()
                     withAnimation(.easeInOut(duration: 0.2)) {
-                        _ = service.addProject()
+                        if let projectIndex = service.addProject() {
+                            beginRenamingProject(projectIndex: projectIndex)
+                        }
                     }
                 } label: {
                     Label("New Project", systemImage: "plus")
@@ -721,11 +728,27 @@ struct ContentView: View {
                     .foregroundStyle(isCurrentProject ? Color.primary.opacity(0.9) : Color.secondary)
                     .frame(width: 18)
 
-                Text(project.title)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(isCurrentProject ? .primary : .secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+                if editingProjectURL == project.url {
+                    TextField("", text: $editingProjectTitleText)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.primary)
+                        .focused($focusedProjectURL, equals: project.url)
+                        .onSubmit {
+                            finishRenamingProject()
+                        }
+                        .onChange(of: focusedProjectURL) { _, focusedURL in
+                            if focusedURL != project.url && editingProjectURL == project.url {
+                                finishRenamingProject()
+                            }
+                        }
+                } else {
+                    Text(project.title)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(isCurrentProject ? .primary : .secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
 
                 Spacer(minLength: 8)
 
@@ -749,6 +772,8 @@ struct ContentView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
             .onTapGesture {
+                guard editingProjectURL != project.url else { return }
+                finishRenamingProject()
                 withAnimation(.easeInOut(duration: 0.15)) {
                     service.selectProject(at: projectIndex)
                 }
@@ -775,6 +800,12 @@ struct ContentView: View {
             openProjectInFinder(projectIndex)
         } label: {
             Label("Show in Finder", systemImage: "folder")
+        }
+
+        Button {
+            beginRenamingProject(projectIndex: projectIndex)
+        } label: {
+            Label("Rename Project", systemImage: "pencil")
         }
 
         Divider()
@@ -890,6 +921,7 @@ struct ContentView: View {
     private func removePage(at index: Int) {
         guard service.pages.count > 1 else { return }
         finishRenamingPage()
+        finishRenamingProject()
         withAnimation(.easeInOut(duration: 0.2)) {
             service.removePage(at: index)
         }
@@ -897,6 +929,7 @@ struct ContentView: View {
 
     private func removeProject(at index: Int) {
         finishRenamingPage()
+        finishRenamingProject()
         withAnimation(.easeInOut(duration: 0.2)) {
             service.removeProject(at: index)
         }
@@ -904,6 +937,7 @@ struct ContentView: View {
 
     private func addMarkdown(projectIndex: Int) {
         finishRenamingPage()
+        finishRenamingProject()
         withAnimation(.easeInOut(duration: 0.2)) {
             _ = service.addMarkdown(toProjectAt: projectIndex)
         }
@@ -934,6 +968,9 @@ struct ContentView: View {
         if editingPageTitleIndex != markdownIndex || projectIndex != service.currentProjectIndex {
             finishRenamingPage()
         }
+        if projectIndex != service.currentProjectIndex {
+            finishRenamingProject()
+        }
 
         withAnimation(.easeInOut(duration: 0.15)) {
             service.selectMarkdown(projectIndex: projectIndex, markdownIndex: markdownIndex)
@@ -942,6 +979,18 @@ struct ContentView: View {
 
     private func selectPage(at index: Int) {
         selectMarkdown(projectIndex: service.currentProjectIndex, markdownIndex: index)
+    }
+
+    private func beginRenamingProject(projectIndex: Int) {
+        guard projectIndex >= 0, projectIndex < service.projects.count else { return }
+        finishRenamingPage()
+        let project = service.projects[projectIndex]
+        editingProjectURL = project.url
+        editingProjectTitleText = project.title
+        service.selectProject(at: projectIndex)
+        DispatchQueue.main.async {
+            focusedProjectURL = project.url
+        }
     }
 
     private func beginRenamingMarkdown(projectIndex: Int, markdownIndex: Int) {
@@ -974,13 +1023,25 @@ struct ContentView: View {
         return "\(max(1, Int(interval / day))) d"
     }
 
-	    private func finishRenamingPage() {
-	        guard let index = editingPageTitleIndex else { return }
-	        service.renamePage(at: index, to: editingPageTitleText)
-	        editingPageTitleIndex = nil
-	        editingPageTitleText = ""
-	        focusedPageTitleIndex = nil
-	    }
+    private func finishRenamingProject() {
+        guard let projectURL = editingProjectURL else { return }
+        let title = editingProjectTitleText
+        editingProjectURL = nil
+        editingProjectTitleText = ""
+        focusedProjectURL = nil
+
+        if let projectIndex = service.projects.firstIndex(where: { $0.url.standardizedFileURL == projectURL.standardizedFileURL }) {
+            service.renameProject(at: projectIndex, to: title)
+        }
+    }
+
+    private func finishRenamingPage() {
+        guard let index = editingPageTitleIndex else { return }
+        service.renamePage(at: index, to: editingPageTitleText)
+        editingPageTitleIndex = nil
+        editingPageTitleText = ""
+        focusedPageTitleIndex = nil
+    }
 
     @discardableResult
     private func run() -> Bool {
