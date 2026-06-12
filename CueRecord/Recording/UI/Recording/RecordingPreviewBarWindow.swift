@@ -77,6 +77,53 @@ final class RecordingPreviewBarWindow: NSObject {
         window.orderFrontRegardless()
     }
 
+    func showRenderOptions(
+        controller: RecordingController,
+        onDelete: @escaping () -> Void,
+        onRenderAll: @escaping () -> Void,
+        onRenderCameraOnly: @escaping () -> Void
+    ) {
+        if barWindow != nil {
+            hide()
+        }
+
+        let visibleFrame = targetVisibleFrame(for: controller.currentRecordingInterfaceFrame)
+        let width: CGFloat = 372
+        let height: CGFloat = 108
+        let margin: CGFloat = 24
+        let frame = NSRect(
+            x: visibleFrame.maxX - width - margin,
+            y: visibleFrame.minY + margin,
+            width: width,
+            height: height
+        )
+
+        let window = configuredWindow(frame: frame, movableByBackground: true)
+        let rootView = RecordingRenderOptionsView(
+            controller: controller,
+            onDelete: { [weak self] in
+                self?.hide()
+                onDelete()
+            },
+            onRenderAll: { [weak self] in
+                self?.hide()
+                onRenderAll()
+            },
+            onRenderCameraOnly: { [weak self] in
+                self?.hide()
+                onRenderCameraOnly()
+            }
+        )
+        .frame(width: width, height: height)
+
+        let contentView = NSHostingView(rootView: rootView)
+        contentView.layer?.backgroundColor = NSColor.clear.cgColor
+        window.contentView = contentView
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
+        window.orderFrontRegardless()
+    }
+
     func hide() {
         barWindow?.contentView = nil
         barWindow?.orderOut(nil)
@@ -571,6 +618,71 @@ private struct RecordingStopBarView: View {
         let minutes = totalSeconds / 60
         let seconds = totalSeconds % 60
         return String(format: "%02d:%02d", minutes, seconds)
+    }
+}
+
+private struct RecordingRenderOptionsView: View {
+    @ObservedObject private var controller: RecordingController
+    let onDelete: () -> Void
+    let onRenderAll: () -> Void
+    let onRenderCameraOnly: () -> Void
+
+    init(
+        controller: RecordingController,
+        onDelete: @escaping () -> Void,
+        onRenderAll: @escaping () -> Void,
+        onRenderCameraOnly: @escaping () -> Void
+    ) {
+        self.controller = controller
+        self.onDelete = onDelete
+        self.onRenderAll = onRenderAll
+        self.onRenderCameraOnly = onRenderCameraOnly
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Choose Output")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.primary.opacity(0.86))
+
+            HStack(spacing: 8) {
+                Button(role: .destructive, action: onDelete) {
+                    Label("Delete", systemImage: "trash")
+                        .frame(maxWidth: .infinity)
+                }
+                .help("Delete this recording")
+                .accessibilityLabel("Delete recording")
+
+                Button(action: onRenderCameraOnly) {
+                    VStack(spacing: 1) {
+                        Label("Camera Only", systemImage: "person.crop.rectangle")
+                            .lineLimit(1)
+                        Text("Transparent")
+                            .font(.system(size: 9, weight: .medium))
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+                .disabled(!controller.canRenderPendingCameraOnly || controller.isExporting)
+                .help("Render camera only with transparent background")
+                .accessibilityLabel("Render camera only with transparent background")
+
+                Button(action: onRenderAll) {
+                    Label("Render All", systemImage: "film.stack")
+                        .frame(maxWidth: .infinity)
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(controller.isExporting)
+                .help("Render full recording")
+                .accessibilityLabel("Render full recording")
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.regular)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .shadow(color: .black.opacity(0.24), radius: 18, y: 10)
     }
 }
 

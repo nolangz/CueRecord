@@ -31,6 +31,7 @@ final class RecordingController: ObservableObject {
     @Published private(set) var isPreviewing = false
     @Published private(set) var isExporting = false
     @Published private(set) var exportStatusText: String?
+    @Published private(set) var pendingCapturedRecording: CapturedRecordingOutput?
     @Published private(set) var lastOutputURL: URL?
     @Published var lastError: String?
 
@@ -64,6 +65,14 @@ final class RecordingController: ObservableObject {
 
     var currentRecordingInterfaceFrame: CGRect? {
         resolvedRecordingTarget()?.interfaceFrame ?? selectedDisplayTarget?.frame
+    }
+
+    var hasPendingCapturedRecording: Bool {
+        pendingCapturedRecording != nil
+    }
+
+    var canRenderPendingCameraOnly: Bool {
+        pendingCapturedRecording?.canRenderCameraOnly == true
     }
 
     private init() {
@@ -364,7 +373,6 @@ final class RecordingController: ObservableObject {
         stopRecordingTimer()
         stopSelectedWindowTracking()
         recordingIndicator.hideIndicator()
-        let baseOutputURL = recordingState.outputURL
         if let snapshot = circularCameraWindow?.metadataSnapshot() {
             recordingState.customCameraOverlayFrame = snapshot.frame
         }
@@ -380,9 +388,7 @@ final class RecordingController: ObservableObject {
             }
 
             do {
-                try await screenRecorder.stopRecording {
-                    runStopCompletionsIfNeeded()
-                }
+                pendingCapturedRecording = try await screenRecorder.stopRecording()
             } catch {
                 lastError = error.localizedDescription
             }
@@ -391,19 +397,33 @@ final class RecordingController: ObservableObject {
             isRecording = false
             isStopping = false
             runStopCompletionsIfNeeded()
+        }
+    }
 
-            if !isExporting, let completedOutputURL = preferredCompletedOutputURL(for: baseOutputURL) {
-                lastOutputURL = completedOutputURL
-                revealRecordingInFinder(completedOutputURL)
-            }
+    func renderPendingCapturedRecording(mode: RecordingRenderMode) {
+        guard let capturedOutput = pendingCapturedRecording, !isExporting else { return }
+        pendingCapturedRecording = nil
+        screenRecorder.renderCapturedRecording(capturedOutput, mode: mode)
+    }
+
+    func deletePendingCapturedRecording() {
+        guard let capturedOutput = pendingCapturedRecording else { return }
+        pendingCapturedRecording = nil
+
+        do {
+            _ = try screenRecorder.deleteCapturedRecording(capturedOutput)
+            lastOutputURL = nil
+            exportStatusText = nil
+        } catch {
+            lastError = error.localizedDescription
         }
     }
 
     private func handleRecordingPostProcessingEvent(_ event: RecordingPostProcessingEvent) {
         switch event {
-        case .started:
+        case .started(_, let mode):
             isExporting = true
-            exportStatusText = "Exporting recording"
+            exportStatusText = mode.statusText
         case .completed(let result):
             isExporting = false
             exportStatusText = nil

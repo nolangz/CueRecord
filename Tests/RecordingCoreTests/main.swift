@@ -205,13 +205,45 @@ func testRecordingArtifactOrganizer() throws {
     try expect(movedURLs.count == 4, "Only non-final root artifacts should move into raw_data")
 }
 
+func testRecordingArtifactDeletion() throws {
+    let fileManager = FileManager.default
+    let root = fileManager.temporaryDirectory
+        .appendingPathComponent("CueRecordArtifactDeletion-\(UUID().uuidString)", isDirectory: true)
+    defer { try? fileManager.removeItem(at: root) }
+
+    try fileManager.createDirectory(at: root, withIntermediateDirectories: true)
+
+    let screenURL = root.appendingPathComponent("ScreenRecord_2026-06-10_17-33-36.mov")
+    let cameraURL = root.appendingPathComponent("ScreenRecord_2026-06-10_17-33-36_camera.mov")
+    let overlayURL = root.appendingPathComponent("ScreenRecord_2026-06-10_17-33-36_overlay.json")
+    let unrelatedURL = root.appendingPathComponent("notes.md")
+
+    for url in [screenURL, cameraURL, overlayURL, unrelatedURL] {
+        try Data(url.lastPathComponent.utf8).write(to: url)
+    }
+
+    let capturedOutput = CapturedRecordingOutput(
+        outputURL: screenURL,
+        cameraURL: cameraURL,
+        overlayMetadataURL: overlayURL
+    )
+    let deletedURLs = try RecordingArtifactOrganizer.deleteArtifacts(for: capturedOutput)
+
+    try expect(!fileManager.fileExists(atPath: screenURL.path), "Delete should remove the raw screen recording")
+    try expect(!fileManager.fileExists(atPath: cameraURL.path), "Delete should remove the camera recording")
+    try expect(!fileManager.fileExists(atPath: overlayURL.path), "Delete should remove overlay metadata")
+    try expect(fileManager.fileExists(atPath: unrelatedURL.path), "Delete should keep unrelated project files")
+    try expect(deletedURLs.count == 3, "Delete should report only the removed recording files")
+}
+
 let tests: [(String, () throws -> Void)] = [
     ("AudioStartGate", testAudioStartGate),
     ("BoundedDropOldestBuffer", testBoundedDropOldestBuffer),
     ("ResolvedRecordingTarget", testResolvedRecordingTarget),
     ("MetricsAndValidator", testMetricsURLAndMissingOutputValidation),
     ("RecordingPixelFormatPolicy", testRecordingPixelFormatPolicy),
-    ("RecordingArtifactOrganizer", testRecordingArtifactOrganizer)
+    ("RecordingArtifactOrganizer", testRecordingArtifactOrganizer),
+    ("RecordingArtifactDeletion", testRecordingArtifactDeletion)
 ]
 
 do {

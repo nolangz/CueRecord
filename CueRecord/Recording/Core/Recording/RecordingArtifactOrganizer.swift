@@ -1,13 +1,41 @@
 import Foundation
 
+nonisolated enum RecordingRenderMode: Equatable, Sendable {
+    case all
+    case cameraOnlyTransparent
+
+    var statusText: String {
+        switch self {
+        case .all:
+            return "Rendering recording"
+        case .cameraOnlyTransparent:
+            return "Rendering camera"
+        }
+    }
+}
+
+nonisolated struct CapturedRecordingOutput: Sendable {
+    let outputURL: URL
+    let cameraURL: URL?
+    let overlayMetadataURL: URL?
+
+    var canRenderCameraOnly: Bool {
+        guard let cameraURL, let overlayMetadataURL else { return false }
+        return FileManager.default.fileExists(atPath: cameraURL.path)
+            && FileManager.default.fileExists(atPath: overlayMetadataURL.path)
+    }
+}
+
 nonisolated struct RecordingPostProcessingResult: Sendable {
     let finalOutputURL: URL
+    let mode: RecordingRenderMode
     let didExportCompositedVideo: Bool
+    let didExportCameraOnlyVideo: Bool
     let movedRawArtifactCount: Int
 }
 
 nonisolated enum RecordingPostProcessingEvent: Sendable {
-    case started(outputURL: URL)
+    case started(outputURL: URL, mode: RecordingRenderMode)
     case completed(RecordingPostProcessingResult)
 }
 
@@ -54,6 +82,55 @@ nonisolated enum RecordingArtifactOrganizer {
         }
 
         return movedURLs
+    }
+
+    @discardableResult
+    static func deleteArtifacts(
+        for capturedOutput: CapturedRecordingOutput,
+        fileManager: FileManager = .default
+    ) throws -> [URL] {
+        let sessionDirectory = capturedOutput.outputURL.deletingLastPathComponent()
+        let rawDataDirectory = sessionDirectory.appendingPathComponent(rawDataDirectoryName, isDirectory: true)
+        let baseName = capturedOutput.outputURL.deletingPathExtension().lastPathComponent
+        var deletedURLs: [URL] = []
+
+        func shouldDelete(_ url: URL) -> Bool {
+            let fileName = url.deletingPathExtension().lastPathComponent
+            return fileName == baseName || fileName.hasPrefix("\(baseName)_")
+        }
+
+        func deleteMatchingFiles(in directory: URL) throws {
+            guard fileManager.fileExists(atPath: directory.path) else { return }
+            let contents = try fileManager.contentsOfDirectory(
+                at: directory,
+                includingPropertiesForKeys: [.isDirectoryKey],
+                options: [.skipsHiddenFiles]
+            )
+
+            for url in contents where shouldDelete(url) {
+                let values = try? url.resourceValues(forKeys: [.isDirectoryKey])
+                guard values?.isDirectory != true else { continue }
+                try fileManager.removeItem(at: url)
+                deletedURLs.append(url)
+            }
+        }
+
+        try deleteMatchingFiles(in: sessionDirectory)
+        try deleteMatchingFiles(in: rawDataDirectory)
+
+        if fileManager.fileExists(atPath: rawDataDirectory.path),
+           (try fileManager.contentsOfDirectory(atPath: rawDataDirectory.path)).isEmpty {
+            try fileManager.removeItem(at: rawDataDirectory)
+            deletedURLs.append(rawDataDirectory)
+        }
+
+        if fileManager.fileExists(atPath: sessionDirectory.path),
+           (try fileManager.contentsOfDirectory(atPath: sessionDirectory.path)).isEmpty {
+            try fileManager.removeItem(at: sessionDirectory)
+            deletedURLs.append(sessionDirectory)
+        }
+
+        return deletedURLs
     }
 
     private static func uniqueDestinationURL(for url: URL, fileManager: FileManager) -> URL {

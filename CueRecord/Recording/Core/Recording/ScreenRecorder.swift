@@ -219,8 +219,8 @@ class ScreenRecorder: NSObject, ObservableObject {
         print("✅ 屏幕录制已开始")
     }
     
-    func stopRecording(onCaptureStopped: (() -> Void)? = nil) async throws {
-        guard isRecording else { return }
+    func stopRecording(onCaptureStopped: (() -> Void)? = nil) async throws -> CapturedRecordingOutput? {
+        guard isRecording else { return nil }
         
         print("⏹️  停止屏幕录制...")
         
@@ -244,17 +244,31 @@ class ScreenRecorder: NSObject, ObservableObject {
         onCaptureStopped?()
         
         // 完成视频写入
-        await finishVideoWriting()
+        let capturedOutput = await finishVideoWriting()
         
         isRecording = false
         frameCount = 0
         firstVideoFrameTime = nil  // 重置首帧视频时间
 
         print("✅ 屏幕录制已停止")
+        return capturedOutput
     }
 
     func setPostProcessingHandler(_ handler: @escaping @MainActor (RecordingPostProcessingEvent) -> Void) {
         postProcessingHandler = handler
+    }
+
+    func renderCapturedRecording(_ capturedOutput: CapturedRecordingOutput, mode: RecordingRenderMode) {
+        Self.startRecordingPostProcessing(
+            capturedOutput: capturedOutput,
+            mode: mode,
+            handler: postProcessingHandler
+        )
+    }
+
+    @discardableResult
+    func deleteCapturedRecording(_ capturedOutput: CapturedRecordingOutput) throws -> [URL] {
+        try RecordingArtifactOrganizer.deleteArtifacts(for: capturedOutput)
     }
 
     private func cleanupAfterFailedStart() async {
@@ -1200,6 +1214,50 @@ class ScreenRecorder: NSObject, ObservableObject {
         }
     }
 
+    private nonisolated static func exportTransparentCameraVideoIfNeeded(
+        for screenURL: URL,
+        cameraURL: URL?,
+        overlayMetadataURL: URL?
+    ) async -> URL? {
+        guard let cameraURL,
+              let overlayMetadataURL,
+              FileManager.default.fileExists(atPath: cameraURL.path),
+              FileManager.default.fileExists(atPath: overlayMetadataURL.path) else {
+            return nil
+        }
+
+        let cameraOnlyURL = Self.siblingOutputURL(for: screenURL, suffix: "camera_only", extension: "mov")
+
+        do {
+            let metadataData = try Data(contentsOf: overlayMetadataURL)
+            let metadata = try JSONDecoder().decode(CameraOverlayMetadataFile.self, from: metadataData)
+            guard !metadata.samples.isEmpty else { return nil }
+
+            try? FileManager.default.removeItem(at: cameraOnlyURL)
+
+            print("🎞️  Rendering transparent camera video: \(cameraOnlyURL.lastPathComponent)")
+            let rendered = try Self.renderTransparentCameraVideo(
+                screenURL: screenURL,
+                cameraURL: cameraURL,
+                metadata: metadata,
+                outputURL: cameraOnlyURL
+            )
+
+            guard rendered else {
+                print("❌ Transparent camera render failed")
+                try? FileManager.default.removeItem(at: cameraOnlyURL)
+                return nil
+            }
+
+            print("✅ Transparent camera video saved: \(cameraOnlyURL.lastPathComponent)")
+            return cameraOnlyURL
+        } catch {
+            print("❌ Transparent camera render failed: \(error.localizedDescription)")
+            try? FileManager.default.removeItem(at: cameraOnlyURL)
+            return nil
+        }
+    }
+
     private nonisolated static func renderCompositedVideo(
         screenURL: URL,
         cameraURL: URL,
@@ -1355,6 +1413,126 @@ class ScreenRecorder: NSObject, ObservableObject {
         return writer.status == .completed
     }
 
+    private nonisolated static func renderTransparentCameraVideo(
+        screenURL: URL,
+        cameraURL: URL,
+        metadata: CameraOverlayMetadataFile,
+        outputURL: URL
+    ) throws -> Bool {
+        let screenAsset = AVURLAsset(url: screenURL)
+        let cameraAsset = AVURLAsset(url: cameraURL)
+
+        guard let screenTrack = screenAsset.tracks(withMediaType: .video).first,
+              let cameraTrack = cameraAsset.tracks(withMediaType: .video).first else {
+            return false
+        }
+
+        let screenSize = Self.normalizedVideoSize(for: screenTrack)
+        let outputWidth = max(2, Int(screenSize.width.rounded(.down)) / 2 * 2)
+        let outputHeight = max(2, Int(screenSize.height.rounded(.down)) / 2 * 2)
+
+        let cameraReader = try AVAssetReader(asset: cameraAsset)
+        let readerSettings: [String: Any] = [
+            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA
+        ]
+
+        let cameraOutput = AVAssetReaderTrackOutput(track: cameraTrack, outputSettings: readerSettings)
+        cameraOutput.alwaysCopiesSampleData = false
+        guard cameraReader.canAdd(cameraOutput) else { return false }
+        cameraReader.add(cameraOutput)
+
+        let writer = try AVAssetWriter(outputURL: outputURL, fileType: .mov)
+        let alphaBitRate = max(
+            6_000_000,
+            outputWidth * outputHeight * Self.screenTargetFrameRate / 20
+        )
+        let videoSettings: [String: Any] = [
+            AVVideoCodecKey: AVVideoCodecType.hevcWithAlpha,
+            AVVideoWidthKey: outputWidth,
+            AVVideoHeightKey: outputHeight,
+            AVVideoColorPropertiesKey: Self.rec709VideoColorProperties(),
+            AVVideoCompressionPropertiesKey: [
+                AVVideoAverageBitRateKey: alphaBitRate,
+                AVVideoMaxKeyFrameIntervalKey: Self.screenTargetFrameRate / 2,
+                AVVideoAllowFrameReorderingKey: false,
+                AVVideoExpectedSourceFrameRateKey: Self.screenTargetFrameRate,
+                AVVideoQualityKey: 0.94
+            ]
+        ]
+
+        let writerInput = AVAssetWriterInput(mediaType: .video, outputSettings: videoSettings)
+        writerInput.expectsMediaDataInRealTime = false
+
+        let pixelBufferAttributes: [String: Any] = [
+            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
+            kCVPixelBufferWidthKey as String: outputWidth,
+            kCVPixelBufferHeightKey as String: outputHeight,
+            kCVPixelBufferCGImageCompatibilityKey as String: true,
+            kCVPixelBufferCGBitmapContextCompatibilityKey as String: true
+        ]
+
+        let adapter = AVAssetWriterInputPixelBufferAdaptor(
+            assetWriterInput: writerInput,
+            sourcePixelBufferAttributes: pixelBufferAttributes
+        )
+
+        guard writer.canAdd(writerInput) else { return false }
+        writer.add(writerInput)
+
+        guard cameraReader.startReading(),
+              writer.startWriting() else {
+            return false
+        }
+
+        writer.startSession(atSourceTime: .zero)
+
+        let ciContext = CIContext()
+        var maskCache: [String: CIImage] = [:]
+        let outputExtent = CGRect(x: 0, y: 0, width: outputWidth, height: outputHeight)
+
+        while let cameraSample = cameraOutput.copyNextSampleBuffer() {
+            guard let cameraPixelBuffer = CMSampleBufferGetImageBuffer(cameraSample),
+                  let outputPixelBuffer = Self.createPixelBuffer(from: adapter) else {
+                continue
+            }
+
+            let cameraTime = CMSampleBufferGetPresentationTimeStamp(cameraSample)
+            let seconds = max(0, CMTimeGetSeconds(cameraTime))
+            let sample = Self.overlaySample(at: seconds, in: metadata.samples)
+            let composedImage = Self.composeTransparentCameraImage(
+                CIImage(cvPixelBuffer: cameraPixelBuffer),
+                overlaySample: sample,
+                metadata: metadata,
+                outputExtent: outputExtent,
+                maskCache: &maskCache
+            )
+
+            ciContext.render(
+                composedImage,
+                to: outputPixelBuffer,
+                bounds: outputExtent,
+                colorSpace: CGColorSpaceCreateDeviceRGB()
+            )
+
+            while !writerInput.isReadyForMoreMediaData {
+                Thread.sleep(forTimeInterval: 0.002)
+            }
+
+            adapter.append(outputPixelBuffer, withPresentationTime: cameraTime.isValid ? cameraTime : .zero)
+        }
+
+        writerInput.markAsFinished()
+        cameraReader.cancelReading()
+
+        let completed = DispatchSemaphore(value: 0)
+        writer.finishWriting {
+            completed.signal()
+        }
+        completed.wait()
+
+        return writer.status == .completed
+    }
+
     private nonisolated static func composeScreenImage(
         _ screenImage: CIImage,
         cameraImage: CIImage?,
@@ -1391,6 +1569,50 @@ class ScreenRecorder: NSObject, ObservableObject {
 
         let blendedImage = scaledCamera.applyingFilter("CIBlendWithMask", parameters: [
             kCIInputBackgroundImageKey: screenImage.cropped(to: outputExtent),
+            kCIInputMaskImageKey: mask
+        ])
+
+        return blendedImage.cropped(to: outputExtent)
+    }
+
+    private nonisolated static func composeTransparentCameraImage(
+        _ cameraImage: CIImage,
+        overlaySample: CameraOverlayMetadataSample?,
+        metadata: CameraOverlayMetadataFile,
+        outputExtent: CGRect,
+        maskCache: inout [String: CIImage]
+    ) -> CIImage {
+        let transparentBackground = CIImage(color: CIColor(red: 0, green: 0, blue: 0, alpha: 0))
+            .cropped(to: outputExtent)
+
+        guard let overlaySample else {
+            return transparentBackground
+        }
+
+        let targetRect = Self.overlayTargetRect(
+            from: overlaySample.frame.cgRect,
+            metadata: metadata,
+            outputExtent: outputExtent
+        )
+
+        guard targetRect.width > 1, targetRect.height > 1 else {
+            return transparentBackground
+        }
+
+        let scaledCamera = Self.aspectFill(
+            cameraImage,
+            sourceExtent: cameraImage.extent,
+            targetRect: targetRect
+        )
+
+        let mask = Self.overlayMask(
+            size: targetRect.size,
+            shape: overlaySample.shape,
+            cache: &maskCache
+        ).transformed(by: CGAffineTransform(translationX: targetRect.minX, y: targetRect.minY))
+
+        let blendedImage = scaledCamera.applyingFilter("CIBlendWithMask", parameters: [
+            kCIInputBackgroundImageKey: transparentBackground,
             kCIInputMaskImageKey: mask
         ])
 
@@ -1699,11 +1921,12 @@ class ScreenRecorder: NSObject, ObservableObject {
     }
     
     // MARK: - 完成视频写入
-    private func finishVideoWriting() async {
-        guard let writer = videoWriter else { return }
+    private func finishVideoWriting() async -> CapturedRecordingOutput? {
+        guard let writer = videoWriter else { return nil }
         let completedOutputURL = outputURL
         let completedCameraURL = enableCameraOverlay ? cameraOutputURL : nil
         let completedOverlayMetadataURL = enableCameraOverlay ? overlayMetadataURL : nil
+        var capturedOutput: CapturedRecordingOutput?
         
         print("🎬 完成视频写入，总帧数: \(frameCount)")
         
@@ -1720,17 +1943,10 @@ class ScreenRecorder: NSObject, ObservableObject {
                 let fileSize = try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int64 ?? 0
                 print("📄 文件大小: \(fileSize ?? 0) bytes")
                 writeRecordingMetrics(for: url)
-            }
-
-            // Post-processing keeps the raw capture files in raw_data and emits
-            // one final composited file with a single mixed audio track.
-            if let url = completedOutputURL {
-                let postProcessingHandler = postProcessingHandler
-                Self.startRecordingPostProcessing(
+                capturedOutput = CapturedRecordingOutput(
                     outputURL: url,
-                    cameraURL: completedCameraURL,
-                    overlayMetadataURL: completedOverlayMetadataURL,
-                    handler: postProcessingHandler
+                    cameraURL: Self.existingFileURL(completedCameraURL),
+                    overlayMetadataURL: Self.existingFileURL(completedOverlayMetadataURL)
                 )
             }
         case .failed:
@@ -1756,6 +1972,8 @@ class ScreenRecorder: NSObject, ObservableObject {
         audioWriterInput = nil
         microphoneWriterInput = nil
         pixelBufferAdapter = nil
+
+        return capturedOutput
     }
 
     private func writeRecordingMetrics(for outputURL: URL) {
@@ -1775,18 +1993,21 @@ class ScreenRecorder: NSObject, ObservableObject {
         recordingMetrics.write(to: outputURL)
     }
 
+    private nonisolated static func existingFileURL(_ url: URL?) -> URL? {
+        guard let url, FileManager.default.fileExists(atPath: url.path) else { return nil }
+        return url
+    }
+
     private static func startRecordingPostProcessing(
-        outputURL: URL,
-        cameraURL: URL?,
-        overlayMetadataURL: URL?,
+        capturedOutput: CapturedRecordingOutput,
+        mode: RecordingRenderMode,
         handler: (@MainActor (RecordingPostProcessingEvent) -> Void)?
     ) {
-        handler?(.started(outputURL: outputURL))
+        handler?(.started(outputURL: capturedOutput.outputURL, mode: mode))
         Task.detached(priority: .utility) {
             let result = await Self.runRecordingPostProcessing(
-                outputURL: outputURL,
-                cameraURL: cameraURL,
-                overlayMetadataURL: overlayMetadataURL
+                capturedOutput: capturedOutput,
+                mode: mode
             )
             await MainActor.run {
                 handler?(.completed(result))
@@ -1795,19 +2016,37 @@ class ScreenRecorder: NSObject, ObservableObject {
     }
 
     private nonisolated static func runRecordingPostProcessing(
-        outputURL: URL,
-        cameraURL: URL?,
-        overlayMetadataURL: URL?
+        capturedOutput: CapturedRecordingOutput,
+        mode: RecordingRenderMode
     ) async -> RecordingPostProcessingResult {
         print("ℹ️  Starting recording post-processing")
+        let outputURL = capturedOutput.outputURL
         let exportStart = Date()
-        let compositedURL = await Self.exportCompositedVideoIfNeeded(
-            for: outputURL,
-            cameraURL: cameraURL,
-            overlayMetadataURL: overlayMetadataURL
-        )
-        let finalOutputURL = compositedURL ?? outputURL
-        if compositedURL != nil {
+        let compositedURL: URL?
+        let cameraOnlyURL: URL?
+
+        switch mode {
+        case .all:
+            compositedURL = await Self.exportCompositedVideoIfNeeded(
+                for: outputURL,
+                cameraURL: capturedOutput.cameraURL,
+                overlayMetadataURL: capturedOutput.overlayMetadataURL
+            )
+            cameraOnlyURL = nil
+        case .cameraOnlyTransparent:
+            compositedURL = nil
+            cameraOnlyURL = await Self.exportTransparentCameraVideoIfNeeded(
+                for: outputURL,
+                cameraURL: capturedOutput.cameraURL,
+                overlayMetadataURL: capturedOutput.overlayMetadataURL
+            )
+        }
+
+        let finalOutputURL = compositedURL
+            ?? cameraOnlyURL
+            ?? (mode == .cameraOnlyTransparent ? capturedOutput.cameraURL : nil)
+            ?? outputURL
+        if compositedURL != nil || cameraOnlyURL != nil {
             updateMetricsExportDuration(
                 for: outputURL,
                 duration: Date().timeIntervalSince(exportStart)
@@ -1831,7 +2070,9 @@ class ScreenRecorder: NSObject, ObservableObject {
 
         return RecordingPostProcessingResult(
             finalOutputURL: finalOutputURL,
+            mode: mode,
             didExportCompositedVideo: compositedURL != nil,
+            didExportCameraOnlyVideo: cameraOnlyURL != nil,
             movedRawArtifactCount: movedRawArtifactCount
         )
     }

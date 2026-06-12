@@ -1103,11 +1103,7 @@ struct ContentView: View {
 
             if shouldShowTeleprompter {
                 if !run() {
-                    recordingPreviewBarWindow.hide()
-                    hidePromptForRecordingPreview()
-                    recordingController.stopRecording {
-                        restoreMainUIAfterRecordingPreview()
-                    }
+                    stopRecordedTeleprompterAndPresentRenderOptions()
                 }
             } else {
                 hidePromptForRecordingPreview()
@@ -1207,11 +1203,39 @@ struct ContentView: View {
     }
 
     private func stopRecordedTeleprompter() {
+        stopRecordedTeleprompterAndPresentRenderOptions()
+    }
+
+    private func stopRecordedTeleprompterAndPresentRenderOptions() {
         recordingPreviewBarWindow.hide()
+        hidePromptForRecordingPreview()
         stop()
         recordingController.stopRecording {
-            restoreMainUIAfterRecordingPreview(focusEditor: false)
+            presentPostRecordingRenderOptions()
         }
+    }
+
+    private func presentPostRecordingRenderOptions() {
+        guard recordingController.hasPendingCapturedRecording else {
+            restoreMainUIAfterRecordingPreview(focusEditor: false)
+            return
+        }
+
+        recordingPreviewBarWindow.showRenderOptions(
+            controller: recordingController,
+            onDelete: {
+                recordingController.deletePendingCapturedRecording()
+                restoreMainUIAfterRecordingPreview(focusEditor: false)
+            },
+            onRenderAll: {
+                restoreMainUIAfterRecordingPreview(focusEditor: false)
+                recordingController.renderPendingCapturedRecording(mode: .all)
+            },
+            onRenderCameraOnly: {
+                restoreMainUIAfterRecordingPreview(focusEditor: false)
+                recordingController.renderPendingCapturedRecording(mode: .cameraOnlyTransparent)
+            }
+        )
     }
 
     private func prepareRecordingOutputName() {
