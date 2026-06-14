@@ -23,6 +23,7 @@ struct ContentView: View {
     @State private var showSettings = false
     @State private var settingsInitialTab: SettingsTab = .appearance
     @State private var showAbout = false
+    @State private var showAIScriptComposer = false
     @State private var setupCompleted = AppSetupPreferences.initialSetupCompleted
     @State private var recordingPreviewBarWindow = RecordingPreviewBarWindow()
     @State private var hidesMainUIForRecordingPreview = false
@@ -232,6 +233,17 @@ struct ContentView: View {
             }
 
             Spacer(minLength: 0)
+
+            Button {
+                showAIScriptComposer = true
+            } label: {
+                Label("AI Script", systemImage: "sparkles")
+                    .font(.system(size: 12, weight: .semibold))
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .disabled(!currentPageHasContent || isRunning || isDictating || recordingController.isRecording || recordingController.isPreviewing)
+            .help("Create an AI-polished spoken script")
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 20)
@@ -545,6 +557,14 @@ struct ContentView: View {
         }
         .sheet(isPresented: $showAbout) {
             AboutView()
+        }
+        .sheet(isPresented: $showAIScriptComposer) {
+            AIScriptComposerSheet(
+                sourceTitle: service.pageTitle(at: service.currentPageIndex),
+                sourceMarkdown: service.currentPageText
+            ) { generatedMarkdown, generatedTitle in
+                _ = service.addPage(text: generatedMarkdown, title: generatedTitle)
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: .openSettings)) { _ in
             settingsInitialTab = .appearance
