@@ -240,13 +240,13 @@ struct ContentView: View {
             Button {
                 showAIScriptComposer = true
             } label: {
-                Label("AI Script", systemImage: "sparkles")
+                Label("AI Breath Cuts", systemImage: "sparkles")
                     .font(.system(size: 12, weight: .semibold))
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
             .disabled(!currentPageHasContent || isRunning || isDictating || recordingController.isRecording || recordingController.isPreviewing)
-            .help("Create an AI-polished spoken script")
+            .help("Add natural teleprompter line breaks")
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 20)
@@ -565,8 +565,8 @@ struct ContentView: View {
             AIScriptComposerSheet(
                 sourceTitle: service.pageTitle(at: service.currentPageIndex),
                 sourceMarkdown: service.currentPageText
-            ) { generatedMarkdown, generatedTitle in
-                _ = service.addPage(text: generatedMarkdown, title: generatedTitle)
+            ) { generatedMarkdown in
+                service.updatePageText(at: service.currentPageIndex, to: generatedMarkdown)
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .openSettings)) { _ in

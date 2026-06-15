@@ -417,6 +417,26 @@ func testCueRecordVaultRepairer() throws {
     try expect(store.loadManifest()?.files.count == 2, "Repair should recover corrupt manifests")
 }
 
+func testTeleprompterLineBreakTokenization() throws {
+    let words = splitTextIntoWords("先讲开头|再讲重点｜最后\n收尾")
+    let breakCount = words.filter(TeleprompterLineBreak.isBreakToken).count
+
+    try expect(breakCount == 3, "Pipe, full-width pipe, and newline should become teleprompter breaks")
+    try expect(!words.contains("|"), "ASCII pipe should not be displayed as a word")
+    try expect(!words.contains("｜"), "Full-width pipe should not be displayed as a word")
+    try expect(words.first == "先", "CJK words should still split into display characters")
+    try expect(words.last == "尾", "Trailing text should be preserved after line breaks")
+}
+
+func testTeleprompterLineBreakDeduplication() throws {
+    let words = splitTextIntoWords("hello||｜\nworld")
+
+    try expect(
+        words == ["hello", TeleprompterLineBreak.token, "world"],
+        "Consecutive explicit breaks should collapse to one visual break"
+    )
+}
+
 let tests: [(String, () throws -> Void)] = [
     ("AudioStartGate", testAudioStartGate),
     ("BoundedDropOldestBuffer", testBoundedDropOldestBuffer),
@@ -428,7 +448,9 @@ let tests: [(String, () throws -> Void)] = [
     ("CueRecordPathPolicy", testCueRecordPathPolicy),
     ("CueRecordProjectManifestAndConflictDetection", testCueRecordProjectManifestAndConflictDetection),
     ("CueRecordTempVaultWorkflow", testCueRecordTempVaultWorkflow),
-    ("CueRecordVaultRepairer", testCueRecordVaultRepairer)
+    ("CueRecordVaultRepairer", testCueRecordVaultRepairer),
+    ("TeleprompterLineBreakTokenization", testTeleprompterLineBreakTokenization),
+    ("TeleprompterLineBreakDeduplication", testTeleprompterLineBreakDeduplication)
 ]
 
 do {

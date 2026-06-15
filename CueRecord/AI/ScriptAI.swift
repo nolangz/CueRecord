@@ -19,99 +19,15 @@ enum AIScriptModel: String, CaseIterable, Identifiable {
     var shortDescription: String {
         switch self {
         case .deepSeekV4Flash:
-            return "Fast draft and low latency"
+            return "Fast breath cutting"
         case .deepSeekV4Pro:
-            return "Stronger reasoning and structure"
+            return "More careful pacing"
         }
     }
 }
 
-enum AIScriptDuration: String, CaseIterable, Identifiable {
-    case thirtySeconds
-    case oneMinute
-    case ninetySeconds
-    case threeMinutes
-    case custom
-
-    var id: String { rawValue }
-
-    var displayName: String {
-        switch self {
-        case .thirtySeconds: return "30 sec"
-        case .oneMinute: return "1 min"
-        case .ninetySeconds: return "90 sec"
-        case .threeMinutes: return "3 min"
-        case .custom: return "Custom"
-        }
-    }
-
-    var promptValue: String {
-        switch self {
-        case .thirtySeconds:
-            return "about 30 seconds, roughly 70-90 spoken English words"
-        case .oneMinute:
-            return "about 1 minute, roughly 130-170 spoken English words"
-        case .ninetySeconds:
-            return "about 90 seconds, roughly 200-240 spoken English words"
-        case .threeMinutes:
-            return "about 3 minutes, roughly 420-500 spoken English words"
-        case .custom:
-            return ""
-        }
-    }
-}
-
-enum AIScriptAudience: String, CaseIterable, Identifiable {
-    case general
-    case customers
-    case investors
-    case internalTeam
-    case developers
-    case custom
-
-    var id: String { rawValue }
-
-    var displayName: String {
-        switch self {
-        case .general: return "General viewers"
-        case .customers: return "Customers"
-        case .investors: return "Investors"
-        case .internalTeam: return "Internal team"
-        case .developers: return "Developers"
-        case .custom: return "Custom"
-        }
-    }
-}
-
-enum AIScriptStyle: String, CaseIterable, Identifiable {
-    case direct
-    case storytelling
-    case tutorial
-    case productDemo
-    case executive
-    case social
-    case custom
-
-    var id: String { rawValue }
-
-    var displayName: String {
-        switch self {
-        case .direct: return "Direct & clear"
-        case .storytelling: return "Storytelling"
-        case .tutorial: return "Tutorial"
-        case .productDemo: return "Product demo"
-        case .executive: return "Executive"
-        case .social: return "Social video"
-        case .custom: return "Custom"
-        }
-    }
-}
-
-struct AIScriptGenerationRequest {
+struct AIBreathCutRequest {
     var sourceMarkdown: String
-    var duration: String
-    var audience: String
-    var style: String
     var customPrompt: String
     var model: AIScriptModel
 }
@@ -127,7 +43,7 @@ enum AIScriptError: LocalizedError {
         case .invalidAPIKey:
             return "Enter a DeepSeek API key."
         case .emptySource:
-            return "Write or select a markdown draft before using AI Script."
+            return "Write or select a script before using AI Breath Cuts."
         case .invalidResponse:
             return "DeepSeek returned an unexpected response."
         case .apiError(let message):
@@ -215,7 +131,7 @@ struct DeepSeekChatClient {
         self.session = session
     }
 
-    func generateScript(request generationRequest: AIScriptGenerationRequest, apiKey: String) async throws -> String {
+    func generateBreathCuts(request generationRequest: AIBreathCutRequest, apiKey: String) async throws -> String {
         let trimmedKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedKey.isEmpty else { throw AIScriptError.invalidAPIKey }
 
@@ -234,7 +150,7 @@ struct DeepSeekChatClient {
                 .init(role: "system", content: systemPrompt),
                 .init(role: "user", content: userPrompt(for: generationRequest))
             ],
-            temperature: 0.6,
+            temperature: 0.25,
             maxTokens: 3200,
             stream: false
         )
@@ -260,30 +176,29 @@ struct DeepSeekChatClient {
 
     private var systemPrompt: String {
         """
-        You are CueRecord's script editor. Transform rough markdown notes into a polished spoken script for screen recording or camera narration.
+        You are CueRecord's breath-cut editor for teleprompter scripts.
         Return only markdown. Do not wrap the answer in code fences. Do not mention that you are an AI.
-        Preserve factual meaning, avoid inventing unsupported claims, and make the script easy to read aloud.
-        Use short paragraphs, clear transitions, and natural spoken language.
+        Preserve the original wording, factual meaning, order, headings, and list structure as much as possible.
+        Your job is to add speaker-friendly line breaks at natural breathing points, not to rewrite or expand the script.
         """
     }
 
-    private func userPrompt(for request: AIScriptGenerationRequest) -> String {
+    private func userPrompt(for request: AIBreathCutRequest) -> String {
         """
-        Rewrite the markdown below into a spoken script.
-
-        Target duration: \(request.duration)
-        Audience: \(request.audience)
-        Style: \(request.style)
+        Add natural breath cuts to the markdown below.
 
         Extra instructions from the user:
         \(request.customPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "None." : request.customPrompt)
 
         Output requirements:
-        - Start with a concise H1 title.
-        - Use markdown headings only where they help the speaker scan the script.
-        - Keep sentences natural for spoken delivery.
-        - Remove duplicated or unfinished notes.
-        - Keep the output focused on the source material.
+        - Return the same script with real newline characters inserted at natural breath points.
+        - Do not use "|" in the output; CueRecord reserves "|" and "｜" as manual teleprompter break markers.
+        - Keep each spoken line short enough to read comfortably in a teleprompter.
+        - For Chinese, prefer roughly 8-16 characters per spoken line unless meaning requires otherwise.
+        - For English, prefer roughly 4-8 spoken words per line unless meaning requires otherwise.
+        - Preserve markdown headings and list markers.
+        - Do not add new claims, examples, titles, summaries, or explanations.
+        - Do not delete meaningful content.
 
         Source markdown:
         ---

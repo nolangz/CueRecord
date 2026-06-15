@@ -6,55 +6,6 @@
 
 import SwiftUI
 
-// MARK: - CJK-aware word splitting
-
-extension Unicode.Scalar {
-    var isCJK: Bool {
-        let v = value
-        return (v >= 0x4E00 && v <= 0x9FFF)    // CJK Unified Ideographs
-            || (v >= 0x3400 && v <= 0x4DBF)    // CJK Extension A
-            || (v >= 0x20000 && v <= 0x2A6DF)  // CJK Extension B
-            || (v >= 0xF900 && v <= 0xFAFF)    // CJK Compatibility Ideographs
-            || (v >= 0x3040 && v <= 0x309F)    // Hiragana
-            || (v >= 0x30A0 && v <= 0x30FF)    // Katakana
-            || (v >= 0xAC00 && v <= 0xD7AF)    // Hangul Syllables
-    }
-}
-
-/// Splits text into display-ready words. CJK characters (Chinese, Japanese, Korean)
-/// are split into individual characters so the flow layout can wrap them properly.
-func splitTextIntoWords(_ text: String) -> [String] {
-    let tokens = text.replacingOccurrences(of: "\n", with: " ")
-        .split(omittingEmptySubsequences: true, whereSeparator: { $0.isWhitespace })
-        .map { String($0) }
-
-    var result: [String] = []
-    for token in tokens {
-        guard token.unicodeScalars.contains(where: { $0.isCJK }) else {
-            result.append(token)
-            continue
-        }
-        // Token contains CJK characters — split each CJK char individually;
-        // consecutive non-CJK chars (e.g. Latin letters, digits) stay grouped.
-        var buffer = ""
-        for char in token {
-            if char.unicodeScalars.first.map({ $0.isCJK }) == true {
-                if !buffer.isEmpty {
-                    result.append(buffer)
-                    buffer = ""
-                }
-                result.append(String(char))
-            } else {
-                buffer.append(char)
-            }
-        }
-        if !buffer.isEmpty {
-            result.append(buffer)
-        }
-    }
-    return result
-}
-
 // MARK: - Data
 
 struct WordItem: Identifiable {
@@ -62,6 +13,7 @@ struct WordItem: Identifiable {
     let word: String
     let charOffset: Int // char offset of this word in the full text (counting spaces)
     let isAnnotation: Bool // true for [bracket] words and emoji-only words
+    let isLineBreak: Bool
 }
 
 // MARK: - Preference key to report word Y positions
@@ -381,7 +333,7 @@ struct WordFlowLayout: View {
     private static var _cachedLines: [[WordItem]] = []
 
     private func cachedLayout() -> ([WordItem], [[WordItem]]) {
-        let key = "\(words.count)|\(words.first ?? "")|\(words.last ?? "")|\(font.pointSize)|\(Int(containerWidth))"
+        let key = "\(words.joined(separator: "\u{1F}"))|\(font.pointSize)|\(Int(containerWidth))"
         if key == Self._cacheKey {
             return (Self._cachedItems, Self._cachedLines)
         }
@@ -396,7 +348,7 @@ struct WordFlowLayout: View {
     // Find the index of the next word to read (first non-fully-lit, non-annotation word)
     private func nextWordIndex(items: [WordItem]) -> Int {
         for item in items {
-            if item.isAnnotation { continue }
+            if item.isAnnotation || item.isLineBreak { continue }
             let charsIntoWord = highlightedCharCount - item.charOffset
             let litCount = max(0, min(item.word.count, charsIntoWord))
             let letterCount = max(1, item.word.filter { $0.isLetter || $0.isNumber }.count)
@@ -527,8 +479,9 @@ struct WordFlowLayout: View {
         var items: [WordItem] = []
         var offset = 0
         for (i, word) in words.enumerated() {
-            let isAnnotation = Self.isAnnotationWord(word)
-            items.append(WordItem(id: i, word: word, charOffset: offset, isAnnotation: isAnnotation))
+            let isLineBreak = TeleprompterLineBreak.isBreakToken(word)
+            let isAnnotation = isLineBreak || Self.isAnnotationWord(word)
+            items.append(WordItem(id: i, word: word, charOffset: offset, isAnnotation: isAnnotation, isLineBreak: isLineBreak))
             offset += word.count + 1 // +1 for space
         }
         return items
@@ -549,6 +502,14 @@ struct WordFlowLayout: View {
         let spaceWidth = (" " as NSString).size(withAttributes: [.font: font]).width
 
         for item in items {
+            if item.isLineBreak {
+                if !lines[lines.count - 1].isEmpty {
+                    lines.append([])
+                    currentLineWidth = 0
+                }
+                continue
+            }
+
             let wordWidth = (item.word as NSString).size(withAttributes: [.font: font]).width + spaceWidth
             if currentLineWidth + wordWidth > containerWidth && !lines[lines.count - 1].isEmpty {
                 lines.append([])
@@ -557,6 +518,11 @@ struct WordFlowLayout: View {
             lines[lines.count - 1].append(item)
             currentLineWidth += wordWidth
         }
+
+        if lines.count > 1, lines.last?.isEmpty == true {
+            lines.removeLast()
+        }
+
         return lines
     }
 }
