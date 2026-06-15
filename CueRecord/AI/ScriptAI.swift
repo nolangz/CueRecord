@@ -178,8 +178,8 @@ struct DeepSeekChatClient {
         """
         You are CueRecord's breath-cut editor for teleprompter scripts.
         Return only markdown. Do not wrap the answer in code fences. Do not mention that you are an AI.
-        Preserve the original wording, factual meaning, order, headings, and list structure as much as possible.
-        Your job is to add speaker-friendly line breaks at natural breathing points, not to rewrite or expand the script.
+        Preserve the original factual meaning, order, headings, and list structure as much as possible.
+        Your job is to add speaker-friendly breath markers and pacing spaces, not to rewrite or expand the script.
         """
     }
 
@@ -191,11 +191,15 @@ struct DeepSeekChatClient {
         \(request.customPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "None." : request.customPrompt)
 
         Output requirements:
-        - Return the same script with real newline characters inserted at natural breath points.
-        - Do not use "|" in the output; CueRecord reserves "|" and "｜" as manual teleprompter break markers.
+        - Return the same script with explicit breath markers at natural breath points.
+        - Inside paragraphs, prefer inserting " ｜" at breath points so the cut is visible and editable.
+        - Use real newline characters for paragraph boundaries, markdown headings, and list items.
+        - CueRecord treats "|" and "｜" as forced teleprompter line breaks; prefer the full-width "｜" form in AI output.
         - Keep each spoken line short enough to read comfortably in a teleprompter.
         - For Chinese, prefer roughly 8-16 characters per spoken line unless meaning requires otherwise.
         - For English, prefer roughly 4-8 spoken words per line unless meaning requires otherwise.
+        - For dense professional terms, technical acronyms, product/API names, and important concepts that should be spoken more slowly, insert small internal spaces where natural, for example "大模型" -> "大 模 型", "AIGC" -> "A I G C", and "ScreenCaptureKit" -> "Screen Capture Kit".
+        - Do not over-space common words or make names ambiguous.
         - Preserve markdown headings and list markers.
         - Do not add new claims, examples, titles, summaries, or explanations.
         - Do not delete meaningful content.

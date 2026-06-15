@@ -123,7 +123,7 @@ struct AIScriptComposerSheet: View {
 
                 Spacer()
 
-                Text("|  ｜  ↵")
+                Text("｜  +  ↵")
                     .font(.system(size: 12, weight: .medium, design: .monospaced))
                     .foregroundStyle(.secondary)
             }
