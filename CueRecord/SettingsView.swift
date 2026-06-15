@@ -780,23 +780,6 @@ struct SettingsView: View {
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
 
-                Divider()
-
-                Text("Visible Lines")
-                    .font(.system(size: 13, weight: .medium))
-
-                Picker("", selection: $settings.visibleLineCountPreset) {
-                    ForEach(VisibleLineCountPreset.allCases) { preset in
-                        Text(preset.label).tag(preset)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-
-                Text("Sets the teleprompter height to show \(settings.visibleLineCountPreset.rawValue) lines by default.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-
                 if settings.overlayMode == .pinned {
                     Divider()
 
@@ -1387,12 +1370,7 @@ struct SettingsView: View {
         settings.notchWidth = NotchSettings.defaultWidth
         settings.fontSizePreset = .lg
         settings.fontFamilyPreset = .sans
-        settings.visibleLineCountPreset = .three
-        settings.textAreaHeight = NotchSettings.textAreaHeight(
-            for: .three,
-            fontSizePreset: settings.fontSizePreset,
-            fontFamilyPreset: settings.fontFamilyPreset
-        )
+        settings.textAreaHeight = NotchSettings.defaultHeight
         settings.fontColorPreset = .white
         settings.cueColorPreset = .white
         settings.cueBrightness = .dim

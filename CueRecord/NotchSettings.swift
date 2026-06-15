@@ -164,20 +164,6 @@ enum CueBrightness: String, CaseIterable, Identifiable {
     }
 }
 
-// MARK: - Visible Line Count
-
-enum VisibleLineCountPreset: Int, CaseIterable, Identifiable {
-    case two = 2
-    case three = 3
-    case four = 4
-
-    var id: Int { rawValue }
-
-    var label: String {
-        "\(rawValue) Lines"
-    }
-}
-
 // MARK: - Overlay Mode
 
 enum OverlayMode: String, CaseIterable, Identifiable {
@@ -346,21 +332,12 @@ class NotchSettings {
     var fontSizePreset: FontSizePreset {
         didSet {
             UserDefaults.standard.set(fontSizePreset.rawValue, forKey: "fontSizePreset")
-            syncTextAreaHeightToVisibleLines()
         }
     }
 
     var fontFamilyPreset: FontFamilyPreset {
         didSet {
             UserDefaults.standard.set(fontFamilyPreset.rawValue, forKey: "fontFamilyPreset")
-            syncTextAreaHeightToVisibleLines()
-        }
-    }
-
-    var visibleLineCountPreset: VisibleLineCountPreset {
-        didSet {
-            UserDefaults.standard.set(visibleLineCountPreset.rawValue, forKey: "visibleLineCountPreset")
-            syncTextAreaHeightToVisibleLines()
         }
     }
 
@@ -488,39 +465,17 @@ class NotchSettings {
     static let minHeight: CGFloat = 100
     static let maxHeight: CGFloat = 400
 
-    static func textAreaHeight(
-        for lineCountPreset: VisibleLineCountPreset,
-        fontSizePreset: FontSizePreset,
-        fontFamilyPreset: FontFamilyPreset
-    ) -> CGFloat {
-        let font = fontFamilyPreset.font(size: fontSizePreset.pointSize)
-        let intrinsicHeight = font.ascender - font.descender + font.leading
-        let lineSpacing: CGFloat = intrinsicHeight / font.pointSize > 1.5 ? 2 : 8
-        let lineHeight = ceil(intrinsicHeight) + lineSpacing
-        let controlsAndPadding: CGFloat = 54
-        let height = CGFloat(lineCountPreset.rawValue) * lineHeight + controlsAndPadding
-        return min(max(ceil(height), minHeight), maxHeight)
-    }
-
     init() {
         let savedWidth = UserDefaults.standard.double(forKey: "notchWidth")
         let savedHeight = UserDefaults.standard.double(forKey: "textAreaHeight")
         let initialFontSizePreset = FontSizePreset(rawValue: UserDefaults.standard.string(forKey: "fontSizePreset") ?? "") ?? .lg
         let initialFontFamilyPreset = FontFamilyPreset(rawValue: UserDefaults.standard.string(forKey: "fontFamilyPreset") ?? "") ?? .sans
-        let initialLineCountPreset = VisibleLineCountPreset(rawValue: UserDefaults.standard.integer(forKey: "visibleLineCountPreset")) ?? .three
 
         self.notchWidth = savedWidth > 0 ? CGFloat(savedWidth) : Self.defaultWidth
-        self.textAreaHeight = savedHeight > 0
-            ? CGFloat(savedHeight)
-            : Self.textAreaHeight(
-                for: initialLineCountPreset,
-                fontSizePreset: initialFontSizePreset,
-                fontFamilyPreset: initialFontFamilyPreset
-            )
+        self.textAreaHeight = savedHeight > 0 ? CGFloat(savedHeight) : Self.defaultHeight
         self.speechLocale = UserDefaults.standard.string(forKey: "speechLocale") ?? Self.defaultLocale
         self.fontSizePreset = initialFontSizePreset
         self.fontFamilyPreset = initialFontFamilyPreset
-        self.visibleLineCountPreset = initialLineCountPreset
         self.fontColorPreset = FontColorPreset(rawValue: UserDefaults.standard.string(forKey: "fontColorPreset") ?? "") ?? .white
         self.cueColorPreset = FontColorPreset(rawValue: UserDefaults.standard.string(forKey: "cueColorPreset") ?? "") ?? .white
         self.cueBrightness = CueBrightness(rawValue: UserDefaults.standard.string(forKey: "cueBrightness") ?? "") ?? .dim
@@ -556,13 +511,5 @@ class NotchSettings {
         self.directorModeEnabled = UserDefaults.standard.object(forKey: "directorModeEnabled") as? Bool ?? false
         let savedDirectorPort = UserDefaults.standard.integer(forKey: "directorServerPort")
         self.directorServerPort = savedDirectorPort > 0 ? UInt16(savedDirectorPort) : 7575
-    }
-
-    private func syncTextAreaHeightToVisibleLines() {
-        textAreaHeight = Self.textAreaHeight(
-            for: visibleLineCountPreset,
-            fontSizePreset: fontSizePreset,
-            fontFamilyPreset: fontFamilyPreset
-        )
     }
 }
