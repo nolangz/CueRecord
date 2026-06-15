@@ -325,6 +325,98 @@ func testCueRecordProjectManifestAndConflictDetection() throws {
     try expect(updatedText == "inside", "Fresh snapshots should allow writes")
 }
 
+func testCueRecordTempVaultWorkflow() throws {
+    let fileManager = FileManager.default
+    let vaultURL = fileManager.temporaryDirectory
+        .appendingPathComponent("CueRecordTempVaultWorkflow-\(UUID().uuidString)", isDirectory: true)
+    let projectURL = vaultURL.appendingPathComponent("Project", isDirectory: true)
+    defer { try? fileManager.removeItem(at: vaultURL) }
+
+    try fileManager.createDirectory(at: projectURL, withIntermediateDirectories: true)
+    let store = CueRecordProjectStore(projectURL: projectURL)
+
+    let firstURL = store.uniqueMarkdownURL(title: "Script/Intro")
+    let firstSnapshot = try store.writeMarkdown("intro", to: firstURL, expectedSnapshot: nil)
+    try expect(firstURL.lastPathComponent == "Script-Intro.md", "Temp-vault workflow should sanitize markdown names")
+
+    let secondURL = store.uniqueMarkdownURL(title: "Script/Intro")
+    _ = try store.writeMarkdown("second", to: secondURL, expectedSnapshot: nil)
+    try expect(secondURL.lastPathComponent == "Script-Intro 2.md", "Temp-vault workflow should allocate duplicate names")
+
+    let manifest = try store.syncManifest(
+        markdownURLs: [firstURL, secondURL],
+        titles: ["Script Intro", "Script Intro 2"],
+        pages: ["intro", "second"],
+        selectedURL: secondURL
+    )
+    try expect(manifest.files.count == 2, "Temp-vault workflow should create two manifest file records")
+    try expect(store.selectedMarkdownURL(from: [firstURL, secondURL]) == secondURL, "Temp-vault workflow should persist selected markdown")
+
+    let renamedURL = store.uniqueMarkdownURL(title: "Final Intro", excluding: firstURL)
+    try fileManager.moveItem(at: firstURL, to: renamedURL)
+    try store.recordMarkdownRename(
+        from: firstURL,
+        to: renamedURL,
+        title: "Final Intro",
+        contentHash: CueRecordPathPolicy.contentHash("intro")
+    )
+    let renamedManifest = try store.syncManifest(
+        markdownURLs: [renamedURL, secondURL],
+        titles: ["Final Intro", "Script Intro 2"],
+        pages: ["intro", "second"],
+        selectedURL: secondURL
+    )
+    try expect(renamedManifest.files.first?.id == manifest.files.first?.id, "Temp-vault workflow should preserve IDs across rename")
+
+    try "external".write(to: renamedURL, atomically: true, encoding: .utf8)
+    do {
+        _ = try store.writeMarkdown("stale write", to: renamedURL, expectedSnapshot: firstSnapshot)
+        throw TestFailure.failed("External changes after rename should make the old snapshot stale")
+    } catch is CueRecordFileConflictError {
+        try expect(true, "Temp-vault workflow should reject stale snapshots")
+    }
+}
+
+func testCueRecordVaultRepairer() throws {
+    let fileManager = FileManager.default
+    let vaultURL = fileManager.temporaryDirectory
+        .appendingPathComponent("CueRecordVaultRepairer-\(UUID().uuidString)", isDirectory: true)
+    let projectURL = vaultURL.appendingPathComponent("Project", isDirectory: true)
+    defer { try? fileManager.removeItem(at: vaultURL) }
+
+    try fileManager.createDirectory(at: projectURL, withIntermediateDirectories: true)
+    let store = CueRecordProjectStore(projectURL: projectURL)
+    let firstURL = projectURL.appendingPathComponent("First.md")
+    let secondURL = projectURL.appendingPathComponent("Second.md")
+    try "one".write(to: firstURL, atomically: true, encoding: .utf8)
+    try "two".write(to: secondURL, atomically: true, encoding: .utf8)
+
+    let firstReport = try CueRecordVaultRepairer().repairVault(at: vaultURL)
+    try expect(firstReport.scannedProjects == 1, "Repair should scan projects with markdown files")
+    try expect(firstReport.createdManifests == 1, "Repair should create a missing manifest")
+    try expect(store.loadManifest()?.files.count == 2, "Repair should include existing markdown files")
+
+    let missingURL = projectURL.appendingPathComponent("Missing.md")
+    try "missing".write(to: missingURL, atomically: true, encoding: .utf8)
+    _ = try store.syncManifest(
+        markdownURLs: [firstURL, secondURL, missingURL],
+        titles: ["First", "Second", "Missing"],
+        pages: ["one", "two", ""],
+        selectedURL: missingURL
+    )
+    try fileManager.removeItem(at: missingURL)
+
+    let staleReport = try CueRecordVaultRepairer().repairVault(at: vaultURL)
+    try expect(staleReport.repairedManifests == 1, "Repair should update manifests with stale records")
+    try expect(staleReport.removedMissingFileRecords == 1, "Repair should report removed stale records")
+    try expect(store.loadManifest()?.files.count == 2, "Repair should remove missing markdown records")
+
+    try Data("{ broken json".utf8).write(to: store.manifestURL)
+    let corruptReport = try CueRecordVaultRepairer().repairVault(at: vaultURL)
+    try expect(corruptReport.repairedManifests == 1, "Repair should replace corrupt manifests")
+    try expect(store.loadManifest()?.files.count == 2, "Repair should recover corrupt manifests")
+}
+
 let tests: [(String, () throws -> Void)] = [
     ("AudioStartGate", testAudioStartGate),
     ("BoundedDropOldestBuffer", testBoundedDropOldestBuffer),
@@ -334,7 +426,9 @@ let tests: [(String, () throws -> Void)] = [
     ("RecordingArtifactOrganizer", testRecordingArtifactOrganizer),
     ("RecordingArtifactDeletion", testRecordingArtifactDeletion),
     ("CueRecordPathPolicy", testCueRecordPathPolicy),
-    ("CueRecordProjectManifestAndConflictDetection", testCueRecordProjectManifestAndConflictDetection)
+    ("CueRecordProjectManifestAndConflictDetection", testCueRecordProjectManifestAndConflictDetection),
+    ("CueRecordTempVaultWorkflow", testCueRecordTempVaultWorkflow),
+    ("CueRecordVaultRepairer", testCueRecordVaultRepairer)
 ]
 
 do {

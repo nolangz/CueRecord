@@ -8,6 +8,7 @@ xcrun swiftc \
   "$ROOT/CueRecord/Storage/CueRecordPathPolicy.swift" \
   "$ROOT/CueRecord/Storage/CueRecordProjectManifest.swift" \
   "$ROOT/CueRecord/Storage/CueRecordProjectStore.swift" \
+  "$ROOT/CueRecord/Storage/CueRecordVaultRepairer.swift" \
   "$ROOT/CueRecord/Recording/Models/RecordingState.swift" \
   "$ROOT/CueRecord/Recording/Core/Recording/ResolvedRecordingTarget.swift" \
   "$ROOT/CueRecord/Recording/Core/Recording/RecordingSync.swift" \

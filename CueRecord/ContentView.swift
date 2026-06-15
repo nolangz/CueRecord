@@ -220,6 +220,9 @@ struct ContentView: View {
                     .onSubmit {
                         finishRenamingPage()
                     }
+                    .onExitCommand {
+                        cancelRenamingPage()
+                    }
             } else {
                 Text(service.pageTitle(at: index))
                     .font(.system(size: 22, weight: .bold))
@@ -765,6 +768,9 @@ struct ContentView: View {
                         .onSubmit {
                             finishRenamingProject()
                         }
+                        .onExitCommand {
+                            cancelRenamingProject()
+                        }
                         .onChange(of: focusedProjectURL) { _, focusedURL in
                             if focusedURL != project.url && editingProjectURL == project.url {
                                 finishRenamingProject()
@@ -861,6 +867,9 @@ struct ContentView: View {
                     .focused($focusedPageTitleIndex, equals: markdownIndex)
                     .onSubmit {
                         finishRenamingPage()
+                    }
+                    .onExitCommand {
+                        cancelRenamingPage()
                     }
             } else {
                 Text(title)
@@ -967,7 +976,9 @@ struct ContentView: View {
         finishRenamingPage()
         finishRenamingProject()
         withAnimation(.easeInOut(duration: 0.2)) {
-            _ = service.addMarkdown(toProjectAt: projectIndex)
+            if let markdownIndex = service.addMarkdown(toProjectAt: projectIndex) {
+                beginRenamingPage(at: markdownIndex)
+            }
         }
     }
 
@@ -1063,9 +1074,21 @@ struct ContentView: View {
         }
     }
 
+    private func cancelRenamingProject() {
+        editingProjectURL = nil
+        editingProjectTitleText = ""
+        focusedProjectURL = nil
+    }
+
     private func finishRenamingPage() {
         guard let index = editingPageTitleIndex else { return }
         service.renamePage(at: index, to: editingPageTitleText)
+        editingPageTitleIndex = nil
+        editingPageTitleText = ""
+        focusedPageTitleIndex = nil
+    }
+
+    private func cancelRenamingPage() {
         editingPageTitleIndex = nil
         editingPageTitleText = ""
         focusedPageTitleIndex = nil

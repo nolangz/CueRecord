@@ -33,6 +33,7 @@ class CueRecordService: NSObject, ObservableObject {
     private static let legacyVaultPathDefaultsKey = "cueShotVaultPath"
     private static let supportedLegacyDocumentExtensions: Set<String> = ["cuerecord", "takeone", "cueshot"]
     private static let supportedURLSchemes: Set<String> = ["cuerecord", "takeone", "cueshot"]
+    private static let pageSaveDebounceDelay: TimeInterval = 0.55
     let overlayController = NotchOverlayController()
     let externalDisplayController = ExternalDisplayController()
     let browserServer = BrowserServer()
@@ -57,6 +58,7 @@ class CueRecordService: NSObject, ObservableObject {
     private var vaultRefreshWorkItem: DispatchWorkItem?
     private var ignoreVaultEventsUntil: Date = .distantPast
     private var pageFileSnapshots: [URL: CueRecordFileSnapshot] = [:]
+    private var pendingPageSaveWorkItems: [Int: DispatchWorkItem] = [:]
 
     override init() {
         super.init()
@@ -79,6 +81,7 @@ class CueRecordService: NSObject, ObservableObject {
     deinit {
         stopVaultFileWatcher()
         vaultRefreshWorkItem?.cancel()
+        pendingPageSaveWorkItems.values.forEach { $0.cancel() }
     }
 
     var hasNextPage: Bool {
@@ -334,6 +337,7 @@ class CueRecordService: NSObject, ObservableObject {
 
     func removePage(at index: Int) {
         guard pages.count > 1, index >= 0, index < pages.count else { return }
+        persistAllPages()
         if index < pageMarkdownURLs.count {
             do {
                 try validateNoExternalChange(at: pageMarkdownURLs[index])
@@ -370,6 +374,7 @@ class CueRecordService: NSObject, ObservableObject {
     }
 
     func replacePages(_ newPages: [String], titles: [String]? = nil, markSaved: Bool = false, persistToVault: Bool = true) {
+        cancelPendingPageSaves()
         let previousMarkdownURLs = pageMarkdownURLs
         pages = newPages.isEmpty ? [""] : newPages
         pageTitles = CueRecordService.normalizedPageTitles(for: pages, titles: titles)
@@ -391,8 +396,8 @@ class CueRecordService: NSObject, ObservableObject {
         guard index >= 0, index < pages.count else { return }
         pages[index] = text
         ensureMarkdownStorageExists(for: index)
-        persistPage(at: index)
-        refreshCurrentProjectMetadata()
+        schedulePersistPage(at: index)
+        refreshCurrentProjectMetadataFromLoadedPages()
         updatePageInfo()
     }
 
@@ -433,6 +438,7 @@ class CueRecordService: NSObject, ObservableObject {
     }
 
     func readCurrentPage(hidesMainWindow: Bool = true) {
+        persistAllPages()
         let trimmed = currentPageText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         readPages.insert(currentPageIndex)
@@ -440,6 +446,7 @@ class CueRecordService: NSObject, ObservableObject {
     }
 
     func showCurrentPageForRecordingPreview() {
+        persistAllPages()
         let trimmed = currentPageText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
 
@@ -464,6 +471,7 @@ class CueRecordService: NSObject, ObservableObject {
     }
 
     func jumpToPage(index: Int) {
+        persistAllPages()
         guard index >= 0 && index < pages.count else { return }
         let text = pages[index].trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
@@ -569,6 +577,8 @@ class CueRecordService: NSObject, ObservableObject {
             try FileManager.default.createDirectory(at: folderURL, withIntermediateDirectories: true)
             startVaultFileWatcher(for: folderURL)
             try migrateLooseMarkdownFiles(in: folderURL)
+            ignoreOwnVaultChanges()
+            _ = try CueRecordVaultRepairer().repairVault(at: folderURL)
 
             let legacyURLs = legacyDocumentURLs(in: folderURL)
             if projectDirectories(in: folderURL).isEmpty,
@@ -762,8 +772,14 @@ class CueRecordService: NSObject, ObservableObject {
         }
     }
 
-    private func refreshVaultFromDisk() {
+    private func refreshVaultFromDisk(flushPendingChanges: Bool = true) {
         guard let vaultURL else { return }
+        if flushPendingChanges {
+            persistAllPages()
+        } else {
+            cancelPendingPageSaves()
+        }
+
         guard FileManager.default.fileExists(atPath: vaultURL.path) else {
             stopVaultFileWatcher()
             self.vaultURL = nil
@@ -785,6 +801,7 @@ class CueRecordService: NSObject, ObservableObject {
     }
 
     private func clearLoadedPages() {
+        cancelPendingPageSaves()
         pages = [""]
         pageTitles = ["Untitled"]
         pageMarkdownURLs = []
@@ -811,8 +828,19 @@ class CueRecordService: NSObject, ObservableObject {
         }
     }
 
+    private func refreshCurrentProjectMetadataFromLoadedPages() {
+        guard currentProjectIndex >= 0, currentProjectIndex < projects.count else { return }
+        var project = projects[currentProjectIndex]
+        project.markdownURLs = pageMarkdownURLs
+        project.markdownTitles = pageTitles.indices.map(pageTitle)
+        project.markdownPreviews = pages.map(markdownPreview)
+        project.modifiedDates = pageMarkdownURLs.map(modifiedDate)
+        projects[currentProjectIndex] = project
+    }
+
     private func loadProject(at index: Int, preferredMarkdownURL: URL? = nil) {
         guard index >= 0, index < projects.count else { return }
+        cancelPendingPageSaves()
 
         currentProjectIndex = index
         let project = projects[index]
@@ -990,9 +1018,32 @@ class CueRecordService: NSObject, ObservableObject {
     }
 
     private func persistAllPages() {
+        cancelPendingPageSaves()
         for index in pages.indices {
             guard persistPage(at: index) else { return }
         }
+    }
+
+    private func schedulePersistPage(at index: Int) {
+        pendingPageSaveWorkItems[index]?.cancel()
+
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.pendingPageSaveWorkItems[index] = nil
+            guard self.persistPage(at: index) else { return }
+            self.refreshCurrentProjectMetadata()
+        }
+
+        pendingPageSaveWorkItems[index] = workItem
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + Self.pageSaveDebounceDelay,
+            execute: workItem
+        )
+    }
+
+    private func cancelPendingPageSaves() {
+        pendingPageSaveWorkItems.values.forEach { $0.cancel() }
+        pendingPageSaveWorkItems.removeAll()
     }
 
     private func markdownFileURL(in directoryURL: URL, preferredTitle: String) -> URL? {
@@ -1258,7 +1309,7 @@ class CueRecordService: NSObject, ObservableObject {
     private func handleFileMutationError(_ error: Error, title: String) {
         if error is CueRecordFileConflictError {
             showFileError(title: "File changed on disk", error: error)
-            refreshVaultFromDisk()
+            refreshVaultFromDisk(flushPendingChanges: false)
         } else {
             showFileError(title: title, error: error)
         }
