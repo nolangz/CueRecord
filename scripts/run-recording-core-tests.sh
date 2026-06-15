@@ -5,6 +5,9 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OUTPUT="${TMPDIR:-/tmp}/cuerecord-recording-core-tests"
 
 xcrun swiftc \
+  "$ROOT/CueRecord/Storage/CueRecordPathPolicy.swift" \
+  "$ROOT/CueRecord/Storage/CueRecordProjectManifest.swift" \
+  "$ROOT/CueRecord/Storage/CueRecordProjectStore.swift" \
   "$ROOT/CueRecord/Recording/Models/RecordingState.swift" \
   "$ROOT/CueRecord/Recording/Core/Recording/ResolvedRecordingTarget.swift" \
   "$ROOT/CueRecord/Recording/Core/Recording/RecordingSync.swift" \

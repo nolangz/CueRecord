@@ -236,6 +236,95 @@ func testRecordingArtifactDeletion() throws {
     try expect(deletedURLs.count == 3, "Delete should report only the removed recording files")
 }
 
+func testCueRecordPathPolicy() throws {
+    let fileManager = FileManager.default
+    let root = fileManager.temporaryDirectory
+        .appendingPathComponent("CueRecordPathPolicy-\(UUID().uuidString)", isDirectory: true)
+    defer { try? fileManager.removeItem(at: root) }
+
+    try fileManager.createDirectory(at: root, withIntermediateDirectories: true)
+
+    try expect(
+        CueRecordPathPolicy.sanitizedPathComponent("CON") == "_CON",
+        "Windows reserved names should be prefixed"
+    )
+
+    let sanitized = CueRecordPathPolicy.sanitizedPathComponent("  ../Deck: intro?/  ")
+    try expect(!sanitized.contains("/"), "Sanitized names should not contain path separators")
+    try expect(!sanitized.contains(":"), "Sanitized names should not contain colon characters")
+    try expect(!sanitized.isEmpty, "Sanitized names should not be empty")
+
+    let existing = root.appendingPathComponent("Clip.md")
+    try Data().write(to: existing)
+
+    let unique = CueRecordPathPolicy.uniqueFileURL(in: root, title: "Clip", pathExtension: "md")
+    try expect(unique.lastPathComponent == "Clip 2.md", "Unique file URLs should avoid existing files")
+
+    let excluded = CueRecordPathPolicy.uniqueFileURL(
+        in: root,
+        title: "Clip",
+        pathExtension: "md",
+        excluding: existing
+    )
+    try expect(excluded.lastPathComponent == "Clip.md", "Excluded URLs should be reusable for renames")
+}
+
+func testCueRecordProjectManifestAndConflictDetection() throws {
+    let fileManager = FileManager.default
+    let root = fileManager.temporaryDirectory
+        .appendingPathComponent("CueRecordProjectStore-\(UUID().uuidString)", isDirectory: true)
+    let projectURL = root.appendingPathComponent("Project", isDirectory: true)
+    defer { try? fileManager.removeItem(at: root) }
+
+    try fileManager.createDirectory(at: projectURL, withIntermediateDirectories: true)
+    let store = CueRecordProjectStore(projectURL: projectURL)
+    let firstURL = projectURL.appendingPathComponent("First.md")
+    try "one".write(to: firstURL, atomically: true, encoding: .utf8)
+
+    let manifest = try store.syncManifest(
+        markdownURLs: [firstURL],
+        titles: ["First"],
+        pages: ["one"],
+        selectedURL: firstURL
+    )
+    try expect(manifest.files.count == 1, "Manifest should track markdown files")
+    try expect(manifest.selectedFileID == manifest.files.first?.id, "Manifest should track selected file ID")
+
+    let originalFileID = manifest.files[0].id
+    let renamedURL = projectURL.appendingPathComponent("Renamed.md")
+    try fileManager.moveItem(at: firstURL, to: renamedURL)
+    try store.recordMarkdownRename(
+        from: firstURL,
+        to: renamedURL,
+        title: "Renamed",
+        contentHash: CueRecordPathPolicy.contentHash("one")
+    )
+    let renamedManifest = try store.syncManifest(
+        markdownURLs: [renamedURL],
+        titles: ["Renamed"],
+        pages: ["one"],
+        selectedURL: renamedURL
+    )
+    try expect(renamedManifest.files.first?.id == originalFileID, "Renamed markdown should keep its stable file ID")
+    try expect(store.selectedMarkdownURL(from: [renamedURL]) == renamedURL, "Selected markdown should resolve from manifest")
+
+    let snapshot = CueRecordFileSnapshot.current(for: renamedURL, cachedText: "one")
+    try "outside".write(to: renamedURL, atomically: true, encoding: .utf8)
+
+    do {
+        _ = try store.writeMarkdown("inside", to: renamedURL, expectedSnapshot: snapshot)
+        throw TestFailure.failed("Stale snapshots should reject writes")
+    } catch is CueRecordFileConflictError {
+        let diskText = try String(contentsOf: renamedURL, encoding: .utf8)
+        try expect(diskText == "outside", "Conflict detection should not overwrite disk changes")
+    }
+
+    let freshSnapshot = CueRecordFileSnapshot.current(for: renamedURL, cachedText: "outside")
+    _ = try store.writeMarkdown("inside", to: renamedURL, expectedSnapshot: freshSnapshot)
+    let updatedText = try String(contentsOf: renamedURL, encoding: .utf8)
+    try expect(updatedText == "inside", "Fresh snapshots should allow writes")
+}
+
 let tests: [(String, () throws -> Void)] = [
     ("AudioStartGate", testAudioStartGate),
     ("BoundedDropOldestBuffer", testBoundedDropOldestBuffer),
@@ -243,7 +332,9 @@ let tests: [(String, () throws -> Void)] = [
     ("MetricsAndValidator", testMetricsURLAndMissingOutputValidation),
     ("RecordingPixelFormatPolicy", testRecordingPixelFormatPolicy),
     ("RecordingArtifactOrganizer", testRecordingArtifactOrganizer),
-    ("RecordingArtifactDeletion", testRecordingArtifactDeletion)
+    ("RecordingArtifactDeletion", testRecordingArtifactDeletion),
+    ("CueRecordPathPolicy", testCueRecordPathPolicy),
+    ("CueRecordProjectManifestAndConflictDetection", testCueRecordProjectManifestAndConflictDetection)
 ]
 
 do {

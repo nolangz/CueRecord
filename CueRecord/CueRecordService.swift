@@ -56,6 +56,7 @@ class CueRecordService: NSObject, ObservableObject {
     private var watchedVaultURL: URL?
     private var vaultRefreshWorkItem: DispatchWorkItem?
     private var ignoreVaultEventsUntil: Date = .distantPast
+    private var pageFileSnapshots: [URL: CueRecordFileSnapshot] = [:]
 
     override init() {
         super.init()
@@ -133,6 +134,7 @@ class CueRecordService: NSObject, ObservableObject {
         }
         guard markdownIndex >= 0, markdownIndex < pages.count else { return }
         currentPageIndex = markdownIndex
+        syncCurrentProjectManifest(selectedMarkdownURL: currentMarkdownFileURL())
         updatePageInfo()
     }
 
@@ -144,8 +146,15 @@ class CueRecordService: NSObject, ObservableObject {
             ignoreOwnVaultChanges()
             let projectURL = uniqueProjectDirectory(in: vaultURL, title: title)
             try FileManager.default.createDirectory(at: projectURL, withIntermediateDirectories: true)
-            let markdownURL = uniqueMarkdownFile(in: projectURL, title: "Untitled")
-            try "".write(to: markdownURL, atomically: true, encoding: .utf8)
+            let projectStore = CueRecordProjectStore(projectURL: projectURL)
+            let markdownURL = projectStore.uniqueMarkdownURL(title: "Untitled")
+            _ = try projectStore.writeMarkdown("", to: markdownURL, expectedSnapshot: nil)
+            _ = try projectStore.syncManifest(
+                markdownURLs: [markdownURL],
+                titles: ["Untitled"],
+                pages: [""],
+                selectedURL: markdownURL
+            )
 
             refreshProjects(selecting: projectURL)
             guard let index = projects.firstIndex(where: { $0.url == projectURL }) else { return nil }
@@ -232,25 +241,38 @@ class CueRecordService: NSObject, ObservableObject {
         let nextTitle = trimmed.isEmpty ? "Untitled" : trimmed
 
         if let projectURL = currentProjectDirectoryURL(), index < pageMarkdownURLs.count {
+            let projectStore = CueRecordProjectStore(projectURL: projectURL)
             let oldMarkdown = pageMarkdownURLs[index]
-            let newMarkdown = uniqueMarkdownFile(in: projectURL, title: nextTitle, excluding: oldMarkdown)
+            let newMarkdown = projectStore.uniqueMarkdownURL(title: nextTitle, excluding: oldMarkdown)
             let resolvedTitle = markdownTitle(from: newMarkdown)
 
             do {
                 ignoreOwnVaultChanges()
                 if oldMarkdown != newMarkdown {
+                    try validateNoExternalChange(at: oldMarkdown)
                     if FileManager.default.fileExists(atPath: oldMarkdown.path) {
                         try FileManager.default.moveItem(at: oldMarkdown, to: newMarkdown)
                     } else {
-                        try pages[index].write(to: newMarkdown, atomically: true, encoding: .utf8)
+                        _ = try projectStore.writeMarkdown(pages[index], to: newMarkdown, expectedSnapshot: nil)
                     }
+                    removeSnapshot(for: oldMarkdown)
                 }
 
                 pageMarkdownURLs[index] = newMarkdown
                 pageTitles[index] = resolvedTitle
+                rememberSnapshot(
+                    CueRecordFileSnapshot.current(for: newMarkdown, cachedText: pages[index]),
+                    for: newMarkdown
+                )
+                try projectStore.recordMarkdownRename(
+                    from: oldMarkdown,
+                    to: newMarkdown,
+                    title: resolvedTitle,
+                    contentHash: CueRecordPathPolicy.contentHash(pages[index])
+                )
             } catch {
-                showFileError(title: "Failed to rename markdown file", error: error)
-                pageTitles[index] = nextTitle
+                handleFileMutationError(error, title: "Failed to rename markdown file")
+                return
             }
         } else {
             pageTitles[index] = nextTitle
@@ -258,6 +280,7 @@ class CueRecordService: NSObject, ObservableObject {
 
         persistPage(at: index)
         refreshCurrentProjectMetadata()
+        syncCurrentProjectManifest()
         updatePageInfo()
     }
 
@@ -276,6 +299,7 @@ class CueRecordService: NSObject, ObservableObject {
         let newIndex = pages.count - 1
         currentPageIndex = newIndex
         refreshCurrentProjectMetadata()
+        syncCurrentProjectManifest()
         updatePageInfo()
         return newIndex
     }
@@ -292,8 +316,9 @@ class CueRecordService: NSObject, ObservableObject {
         do {
             ignoreOwnVaultChanges()
             try FileManager.default.createDirectory(at: projectURL, withIntermediateDirectories: true)
-            let markdownURL = uniqueMarkdownFile(in: projectURL, title: requestedTitle)
-            try text.write(to: markdownURL, atomically: true, encoding: .utf8)
+            let projectStore = CueRecordProjectStore(projectURL: projectURL)
+            let markdownURL = projectStore.uniqueMarkdownURL(title: requestedTitle)
+            _ = try projectStore.writeMarkdown(text, to: markdownURL, expectedSnapshot: nil)
 
             refreshProjects(selecting: projectURL)
             guard let refreshedProjectIndex = projects.firstIndex(where: { $0.url.standardizedFileURL == projectURL.standardizedFileURL }) else {
@@ -310,7 +335,14 @@ class CueRecordService: NSObject, ObservableObject {
     func removePage(at index: Int) {
         guard pages.count > 1, index >= 0, index < pages.count else { return }
         if index < pageMarkdownURLs.count {
+            do {
+                try validateNoExternalChange(at: pageMarkdownURLs[index])
+            } catch {
+                handleFileMutationError(error, title: "Failed to remove markdown file")
+                return
+            }
             trashOrRemoveFile(pageMarkdownURLs[index])
+            removeSnapshot(for: pageMarkdownURLs[index])
             pageMarkdownURLs.remove(at: index)
         }
         pages.remove(at: index)
@@ -333,6 +365,7 @@ class CueRecordService: NSObject, ObservableObject {
             currentPageIndex -= 1
         }
         refreshCurrentProjectMetadata()
+        syncCurrentProjectManifest()
         updatePageInfo()
     }
 
@@ -755,6 +788,7 @@ class CueRecordService: NSObject, ObservableObject {
         pages = [""]
         pageTitles = ["Untitled"]
         pageMarkdownURLs = []
+        pageFileSnapshots.removeAll()
         currentProjectIndex = 0
         currentPageIndex = 0
         readPages.removeAll()
@@ -782,13 +816,16 @@ class CueRecordService: NSObject, ObservableObject {
 
         currentProjectIndex = index
         let project = projects[index]
+        let projectStore = CueRecordProjectStore(projectURL: project.url)
         let loaded = loadMarkdownFiles(project.markdownURLs)
         pages = loaded.pages.isEmpty ? [""] : loaded.pages
         pageTitles = CueRecordService.normalizedPageTitles(for: pages, titles: loaded.titles)
         pageMarkdownURLs = project.markdownURLs
+        pageFileSnapshots = loaded.snapshots
 
-        if let preferredMarkdownURL,
-           let markdownIndex = pageMarkdownURLs.firstIndex(where: { $0.standardizedFileURL == preferredMarkdownURL.standardizedFileURL }) {
+        let selectedMarkdownURL = preferredMarkdownURL ?? projectStore.selectedMarkdownURL(from: pageMarkdownURLs)
+        if let selectedMarkdownURL,
+           let markdownIndex = pageMarkdownURLs.firstIndex(where: { $0.standardizedFileURL == selectedMarkdownURL.standardizedFileURL }) {
             currentPageIndex = markdownIndex
         } else {
             currentPageIndex = min(currentPageIndex, max(pages.count - 1, 0))
@@ -797,6 +834,7 @@ class CueRecordService: NSObject, ObservableObject {
         readPages.removeAll()
         savedPages = pages
         savedPageTitles = pageTitles
+        syncCurrentProjectManifest(selectedMarkdownURL: currentMarkdownFileURL())
         updatePageInfo()
     }
 
@@ -856,9 +894,11 @@ class CueRecordService: NSObject, ObservableObject {
         do {
             ignoreOwnVaultChanges()
             try FileManager.default.createDirectory(at: projectURL, withIntermediateDirectories: true)
-            let markdownURL = uniqueMarkdownFile(in: projectURL, title: title)
+            let projectStore = CueRecordProjectStore(projectURL: projectURL)
+            let markdownURL = projectStore.uniqueMarkdownURL(title: title)
             let resolvedTitle = markdownTitle(from: markdownURL)
-            try text.write(to: markdownURL, atomically: true, encoding: .utf8)
+            let snapshot = try projectStore.writeMarkdown(text, to: markdownURL, expectedSnapshot: nil)
+            rememberSnapshot(snapshot, for: markdownURL)
             return (resolvedTitle, markdownURL)
         } catch {
             showFileError(title: "Failed to create markdown file", error: error)
@@ -872,9 +912,12 @@ class CueRecordService: NSObject, ObservableObject {
         do {
             ignoreOwnVaultChanges()
             for markdownURL in previousMarkdownURLs {
+                try validateNoExternalChange(at: markdownURL)
                 trashOrRemoveFile(markdownURL)
+                removeSnapshot(for: markdownURL)
             }
             pageMarkdownURLs.removeAll()
+            pageFileSnapshots.removeAll()
             try FileManager.default.createDirectory(at: projectURL, withIntermediateDirectories: true)
 
             let currentPages = pages
@@ -888,22 +931,35 @@ class CueRecordService: NSObject, ObservableObject {
                 }
             }
         } catch {
-            showFileError(title: "Failed to update CueRecord project", error: error)
+            handleFileMutationError(error, title: "Failed to update CueRecord project")
         }
         refreshCurrentProjectMetadata()
+        syncCurrentProjectManifest()
     }
 
-    private func persistPage(at index: Int) {
-        guard index >= 0, index < pages.count else { return }
-        guard index < pageMarkdownURLs.count else { return }
+    @discardableResult
+    private func persistPage(at index: Int) -> Bool {
+        guard index >= 0, index < pages.count else { return true }
+        guard index < pageMarkdownURLs.count else { return true }
+        guard let projectURL = currentProjectDirectoryURL() else { return true }
 
         do {
             ignoreOwnVaultChanges()
-            try pages[index].write(to: pageMarkdownURLs[index], atomically: true, encoding: .utf8)
+            let markdownURL = pageMarkdownURLs[index]
+            let projectStore = CueRecordProjectStore(projectURL: projectURL)
+            let snapshot = try projectStore.writeMarkdown(
+                pages[index],
+                to: markdownURL,
+                expectedSnapshot: snapshot(for: markdownURL)
+            )
+            rememberSnapshot(snapshot, for: markdownURL)
             savedPages = pages
             savedPageTitles = pageTitles
+            syncCurrentProjectManifest()
+            return true
         } catch {
-            showFileError(title: "Failed to save markdown file", error: error)
+            handleFileMutationError(error, title: "Failed to save markdown file")
+            return false
         }
     }
 
@@ -935,7 +991,7 @@ class CueRecordService: NSObject, ObservableObject {
 
     private func persistAllPages() {
         for index in pages.indices {
-            persistPage(at: index)
+            guard persistPage(at: index) else { return }
         }
     }
 
@@ -957,26 +1013,21 @@ class CueRecordService: NSObject, ObservableObject {
     }
 
     private func markdownFiles(in projectURL: URL) -> [URL] {
-        ((try? FileManager.default.contentsOfDirectory(
-            at: projectURL,
-            includingPropertiesForKeys: [.isDirectoryKey, .contentModificationDateKey],
-            options: [.skipsHiddenFiles]
-        )) ?? [])
-        .filter { url in
-            let isDirectory = (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
-            return !isDirectory && url.pathExtension.lowercased() == "md"
-        }
-        .sorted { lhs, rhs in
-            lhs.lastPathComponent.localizedStandardCompare(rhs.lastPathComponent) == .orderedAscending
-        }
+        CueRecordProjectStore(projectURL: projectURL).markdownFiles()
     }
 
-    private func loadMarkdownFiles(_ markdownFiles: [URL]) -> (pages: [String], titles: [String]) {
-        let loadedPages = markdownFiles.map { url in
-            (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+    private func loadMarkdownFiles(_ markdownFiles: [URL]) -> (pages: [String], titles: [String], snapshots: [URL: CueRecordFileSnapshot]) {
+        var loadedPages: [String] = []
+        var loadedSnapshots: [URL: CueRecordFileSnapshot] = [:]
+
+        for url in markdownFiles {
+            let text = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+            loadedPages.append(text)
+            loadedSnapshots[snapshotKey(for: url)] = CueRecordFileSnapshot.current(for: url, cachedText: text)
         }
+
         let loadedTitles = markdownFiles.map(markdownTitle(from:))
-        return (loadedPages, loadedTitles)
+        return (loadedPages, loadedTitles, loadedSnapshots)
     }
 
     private func loadLegacyPageDirectories(in projectURL: URL) -> (pages: [String], titles: [String]) {
@@ -1007,29 +1058,20 @@ class CueRecordService: NSObject, ObservableObject {
     }
 
     private func uniqueMarkdownFile(in vaultURL: URL, title: String, excluding excludedURL: URL? = nil) -> URL {
-        let baseName = sanitizedPagePathComponent(title)
-        var candidate = vaultURL.appendingPathComponent("\(baseName).md")
-        var suffix = 2
-
-        while FileManager.default.fileExists(atPath: candidate.path), excludedURL.map({ candidate == $0 }) != true {
-            candidate = vaultURL.appendingPathComponent("\(baseName) \(suffix).md")
-            suffix += 1
-        }
-
-        return candidate
+        CueRecordPathPolicy.uniqueFileURL(
+            in: vaultURL,
+            title: title,
+            pathExtension: "md",
+            excluding: excludedURL
+        )
     }
 
     private func uniqueProjectDirectory(in vaultURL: URL, title: String, excluding excludedURL: URL? = nil) -> URL {
-        let baseName = sanitizedPagePathComponent(title)
-        var candidate = vaultURL.appendingPathComponent(baseName, isDirectory: true)
-        var suffix = 2
-
-        while FileManager.default.fileExists(atPath: candidate.path), excludedURL.map({ candidate == $0 }) != true {
-            candidate = vaultURL.appendingPathComponent("\(baseName) \(suffix)", isDirectory: true)
-            suffix += 1
-        }
-
-        return candidate
+        CueRecordPathPolicy.uniqueDirectoryURL(
+            in: vaultURL,
+            title: title,
+            excluding: excludedURL
+        )
     }
 
     private func markdownTitle(from url: URL) -> String {
@@ -1049,19 +1091,50 @@ class CueRecordService: NSObject, ObservableObject {
         (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate)
     }
 
+    private func snapshotKey(for url: URL) -> URL {
+        url.standardizedFileURL
+    }
+
+    private func snapshot(for url: URL) -> CueRecordFileSnapshot? {
+        pageFileSnapshots[snapshotKey(for: url)]
+    }
+
+    private func rememberSnapshot(_ snapshot: CueRecordFileSnapshot, for url: URL) {
+        pageFileSnapshots[snapshotKey(for: url)] = snapshot
+    }
+
+    private func removeSnapshot(for url: URL) {
+        pageFileSnapshots.removeValue(forKey: snapshotKey(for: url))
+    }
+
+    private func validateNoExternalChange(at url: URL) throws {
+        guard let previousSnapshot = snapshot(for: url) else { return }
+        let currentSnapshot = CueRecordFileSnapshot.current(for: url)
+        guard currentSnapshot.matches(previousSnapshot) else {
+            throw CueRecordFileConflictError.changedOnDisk(url)
+        }
+    }
+
+    @discardableResult
+    private func syncCurrentProjectManifest(selectedMarkdownURL: URL? = nil) -> CueRecordProjectManifest? {
+        guard let projectURL = currentProjectDirectoryURL() else { return nil }
+
+        do {
+            ignoreOwnVaultChanges()
+            return try CueRecordProjectStore(projectURL: projectURL).syncManifest(
+                markdownURLs: pageMarkdownURLs,
+                titles: pageTitles,
+                pages: pages,
+                selectedURL: selectedMarkdownURL ?? currentMarkdownFileURL()
+            )
+        } catch {
+            showFileError(title: "Failed to update project manifest", error: error)
+            return nil
+        }
+    }
+
     private func sanitizedPagePathComponent(_ value: String) -> String {
-        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        let source = trimmed.isEmpty ? "Untitled" : trimmed
-        let illegalCharacters = CharacterSet(charactersIn: "/:\\?%*|\"<>")
-            .union(.controlCharacters)
-            .union(.newlines)
-
-        let sanitized = source.unicodeScalars
-            .map { illegalCharacters.contains($0) ? "-" : String($0) }
-            .joined()
-            .trimmingCharacters(in: CharacterSet(charactersIn: ". "))
-
-        return sanitized.isEmpty ? "Untitled" : sanitized
+        CueRecordPathPolicy.sanitizedPathComponent(value)
     }
 
     private func trashOrRemoveFile(_ url: URL) {
@@ -1180,6 +1253,15 @@ class CueRecordService: NSObject, ObservableObject {
         alert.messageText = title
         alert.informativeText = error.localizedDescription
         alert.runModal()
+    }
+
+    private func handleFileMutationError(_ error: Error, title: String) {
+        if error is CueRecordFileConflictError {
+            showFileError(title: "File changed on disk", error: error)
+            refreshVaultFromDisk()
+        } else {
+            showFileError(title: title, error: error)
+        }
     }
 
     // MARK: - Browser Server
