@@ -10,6 +10,7 @@ import SwiftUI
 
 enum TeleprompterWordPace {
     case normal
+    case fast
     case slow
 }
 
@@ -337,6 +338,10 @@ struct WordFlowLayout: View {
         return ratio > 1.5 ? 2 : 8
     }
 
+    private var fastPaceColor: Color {
+        Color(red: 0.38, green: 0.68, blue: 1.0)
+    }
+
     // Simple layout cache to avoid re-measuring words on every highlight update
     private static var _cacheKey: String = ""
     private static var _cachedItems: [WordItem] = []
@@ -419,13 +424,14 @@ struct WordFlowLayout: View {
         let isCurrentWord = isNextWord || (charsIntoWord >= 0 && !isFullyLit)
         let displayText = item.displayText + " "
         let isSlow = item.pace == .slow
+        let isFast = item.pace == .fast
         let slowTracking = isSlow ? max(1.5, font.pointSize * 0.08) : 0
 
         // When highlighting is off (classic/silence-paused), use uniform color
         if !highlightWords {
             Text(displayText)
                 .font(displayFont(for: item))
-                .foregroundStyle(uniformColor(for: item, isSlow: isSlow))
+                .foregroundStyle(uniformColor(for: item, isFast: isFast, isSlow: isSlow))
                 .tracking(slowTracking)
                 .background(
                     GeometryReader { wordGeo in
@@ -442,7 +448,7 @@ struct WordFlowLayout: View {
         } else if item.isFastCue {
             Text(displayText)
                 .font(.system(size: max(11, font.pointSize * 0.72), weight: .bold, design: .rounded))
-                .foregroundStyle(Color(red: 0.48, green: 0.72, blue: 1.0).opacity(0.9))
+                .foregroundStyle(fastPaceColor.opacity(0.9))
                 .padding(.trailing, 4)
         } else if item.isAnnotation {
             // Annotations: italic, dimmed with cue color
@@ -474,7 +480,9 @@ struct WordFlowLayout: View {
             // Base color for the whole word
             let wordColor: Color = isSlow
                 ? (isFullyLit ? Color(red: 1.0, green: 0.78, blue: 0.35).opacity(0.38) : Color(red: 1.0, green: 0.78, blue: 0.35).opacity(isCurrentWord ? 0.78 : 0.95))
-                : (isFullyLit ? highlightColor.opacity(0.3) : dimColor)
+                : isFast
+                    ? fastPaceColor.opacity(isFullyLit ? 0.38 : (isCurrentWord ? 0.78 : 0.95))
+                    : (isFullyLit ? highlightColor.opacity(0.3) : dimColor)
 
             Text(displayText)
                 .font(Font(font))
@@ -508,13 +516,17 @@ struct WordFlowLayout: View {
         return Font(font)
     }
 
-    private func uniformColor(for item: WordItem, isSlow: Bool) -> Color {
+    private func uniformColor(for item: WordItem, isFast: Bool, isSlow: Bool) -> Color {
         if item.isFastCue {
-            return Color(red: 0.48, green: 0.72, blue: 1.0).opacity(0.85)
+            return fastPaceColor.opacity(0.85)
         }
 
         if isSlow {
             return Color(red: 1.0, green: 0.78, blue: 0.35).opacity(0.92)
+        }
+
+        if isFast {
+            return fastPaceColor.opacity(0.92)
         }
 
         if item.isAnnotation {
@@ -555,6 +567,8 @@ struct WordFlowLayout: View {
 
             if isSlowCue {
                 pace = .slow
+            } else if isFastCue {
+                pace = .fast
             }
 
             offset += word.count + 1 // +1 for space
