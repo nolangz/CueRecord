@@ -6,11 +6,17 @@
 import Foundation
 
 enum TeleprompterLineBreak {
-    static let token = "\u{2028}"
+    static let markerToken = "\u{2028}"
+    static let newlineToken = "\u{2029}"
+    static let token = markerToken
     static let markers: Set<Character> = ["|", "｜"]
 
     static func isBreakToken(_ word: String) -> Bool {
-        word == token
+        word == markerToken || word == newlineToken
+    }
+
+    static func isMarkerBreakToken(_ word: String) -> Bool {
+        word == markerToken
     }
 }
 
@@ -64,15 +70,24 @@ func splitTextIntoWords(_ text: String) -> [String] {
         buffer = ""
     }
 
-    func appendBreak() {
-        guard result.last != TeleprompterLineBreak.token else { return }
-        result.append(TeleprompterLineBreak.token)
+    func appendBreak(_ breakToken: String) {
+        if let last = result.last, TeleprompterLineBreak.isBreakToken(last) {
+            if TeleprompterLineBreak.isMarkerBreakToken(breakToken),
+               !TeleprompterLineBreak.isMarkerBreakToken(last) {
+                result[result.count - 1] = breakToken
+            }
+            return
+        }
+        result.append(breakToken)
     }
 
     for char in text {
-        if char == "\n" || char == "\r" || TeleprompterLineBreak.markers.contains(char) {
+        if TeleprompterLineBreak.markers.contains(char) {
             flushBuffer()
-            appendBreak()
+            appendBreak(TeleprompterLineBreak.markerToken)
+        } else if char == "\n" || char == "\r" {
+            flushBuffer()
+            appendBreak(TeleprompterLineBreak.newlineToken)
         } else if char.isWhitespace {
             flushBuffer()
         } else {
@@ -82,7 +97,7 @@ func splitTextIntoWords(_ text: String) -> [String] {
 
     flushBuffer()
 
-    if result.last == TeleprompterLineBreak.token {
+    if let last = result.last, TeleprompterLineBreak.isBreakToken(last) {
         result.removeLast()
     }
 

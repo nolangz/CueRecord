@@ -26,10 +26,54 @@ enum AIScriptModel: String, CaseIterable, Identifiable {
     }
 }
 
+enum AIBreathMarkerMode: String, CaseIterable, Identifiable {
+    case marked
+    case clean
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .marked:
+            return "Marked"
+        case .clean:
+            return "Clean"
+        }
+    }
+
+    var outputSummary: String {
+        switch self {
+        case .marked:
+            return "｜  +  ↵"
+        case .clean:
+            return "↵"
+        }
+    }
+
+    var promptInstructions: String {
+        switch self {
+        case .marked:
+            return """
+            - Return the same script with explicit breath markers at natural breath points.
+            - Inside paragraphs, prefer inserting " ｜" at breath points so the cut is visible and editable.
+            - Use real newline characters for paragraph boundaries, markdown headings, and list items.
+            - CueRecord treats "|" and "｜" as forced teleprompter line breaks; prefer the full-width "｜" form in AI output.
+            """
+        case .clean:
+            return """
+            - Return the same script with real newline characters inserted at natural breath points.
+            - Do not include "|" or "｜" in the output.
+            - Use real newline characters for paragraph boundaries, markdown headings, list items, and breath cuts.
+            """
+        }
+    }
+}
+
 struct AIBreathCutRequest {
     var sourceMarkdown: String
     var customPrompt: String
     var model: AIScriptModel
+    var markerMode: AIBreathMarkerMode
 }
 
 enum AIScriptError: LocalizedError {
@@ -179,7 +223,7 @@ struct DeepSeekChatClient {
         You are CueRecord's breath-cut editor for teleprompter scripts.
         Return only markdown. Do not wrap the answer in code fences. Do not mention that you are an AI.
         Preserve the original factual meaning, order, headings, and list structure as much as possible.
-        Your job is to add speaker-friendly breath markers and pacing spaces, not to rewrite or expand the script.
+        Your job is to add speaker-friendly breath cuts and pacing spaces, not to rewrite or expand the script.
         """
     }
 
@@ -191,10 +235,7 @@ struct DeepSeekChatClient {
         \(request.customPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "None." : request.customPrompt)
 
         Output requirements:
-        - Return the same script with explicit breath markers at natural breath points.
-        - Inside paragraphs, prefer inserting " ｜" at breath points so the cut is visible and editable.
-        - Use real newline characters for paragraph boundaries, markdown headings, and list items.
-        - CueRecord treats "|" and "｜" as forced teleprompter line breaks; prefer the full-width "｜" form in AI output.
+        \(request.markerMode.promptInstructions)
         - Keep each spoken line short enough to read comfortably in a teleprompter.
         - For Chinese, prefer roughly 8-16 characters per spoken line unless meaning requires otherwise.
         - For English, prefer roughly 4-8 spoken words per line unless meaning requires otherwise.

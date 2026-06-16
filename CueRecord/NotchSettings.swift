@@ -462,7 +462,7 @@ class NotchSettings {
 
     static let minWidth: CGFloat = 310
     static let maxWidth: CGFloat = 500
-    static let minHeight: CGFloat = 100
+    static let minHeight: CGFloat = 50
     static let maxHeight: CGFloat = 400
 
     init() {

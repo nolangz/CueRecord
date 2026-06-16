@@ -8,6 +8,7 @@ struct AIScriptComposerSheet: View {
     let onGenerated: (String) -> Void
 
     @State private var selectedModel: AIScriptModel = .deepSeekV4Flash
+    @State private var breathMarkerMode: AIBreathMarkerMode = .marked
     @State private var customPrompt = ""
     @State private var apiKey = ""
     @State private var isEditingAPIKey = false
@@ -84,6 +85,21 @@ struct AIScriptComposerSheet: View {
             }
 
             Spacer()
+
+            VStack(alignment: .trailing, spacing: 5) {
+                Text("Breath Marks")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.secondary)
+
+                Picker("Breath Marks", selection: $breathMarkerMode) {
+                    ForEach(AIBreathMarkerMode.allCases) { mode in
+                        Text(mode.label).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(width: 142)
+            }
         }
         .padding(20)
     }
@@ -123,7 +139,7 @@ struct AIScriptComposerSheet: View {
 
                 Spacer()
 
-                Text("｜  +  ↵")
+                Text(breathMarkerMode.outputSummary)
                     .font(.system(size: 12, weight: .medium, design: .monospaced))
                     .foregroundStyle(.secondary)
             }
@@ -258,7 +274,8 @@ struct AIScriptComposerSheet: View {
             let request = AIBreathCutRequest(
                 sourceMarkdown: sourceMarkdown,
                 customPrompt: customPrompt,
-                model: selectedModel
+                model: selectedModel,
+                markerMode: breathMarkerMode
             )
             let script = try await client.generateBreathCuts(request: request, apiKey: resolvedAPIKey)
             onGenerated(script)

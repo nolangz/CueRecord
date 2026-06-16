@@ -363,6 +363,9 @@ struct WordFlowLayout: View {
         let (items, lines) = cachedLayout()
         let nextIdx = nextWordIndex(items: items)
         let totalLines = lines.count
+        let centersMarkedBreathLines = words.contains(where: TeleprompterLineBreak.isMarkerBreakToken)
+        let stackAlignment: HorizontalAlignment = centersMarkedBreathLines ? .center : .leading
+        let rowAlignment: Alignment = centersMarkedBreathLines ? .center : .leading
 
         // Estimate line height for visibility culling using actual font metrics
         let lineH = ceil(font.ascender - font.descender + font.leading) + lineSpacing
@@ -373,7 +376,7 @@ struct WordFlowLayout: View {
         let startLine = canCull ? max(0, min(totalLines, Int(floor((-scrollOffset - buffer) / lineH)))) : 0
         let endLine = canCull ? max(startLine, min(totalLines, Int(ceil((viewportHeight - scrollOffset + buffer) / lineH)))) : totalLines
 
-        VStack(alignment: .leading, spacing: lineSpacing) {
+        VStack(alignment: stackAlignment, spacing: lineSpacing) {
             if startLine > 0 {
                 Color.clear.frame(height: CGFloat(startLine) * lineH)
             }
@@ -385,13 +388,14 @@ struct WordFlowLayout: View {
                             .id(item.id)
                     }
                 }
+                .frame(maxWidth: .infinity, alignment: rowAlignment)
             }
 
             if endLine < totalLines {
                 Color.clear.frame(height: CGFloat(totalLines - endLine) * lineH)
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: rowAlignment)
         .coordinateSpace(name: "flowLayout")
     }
 

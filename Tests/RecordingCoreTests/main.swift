@@ -420,8 +420,12 @@ func testCueRecordVaultRepairer() throws {
 func testTeleprompterLineBreakTokenization() throws {
     let words = splitTextIntoWords("先讲开头|再讲重点｜最后\n收尾")
     let breakCount = words.filter(TeleprompterLineBreak.isBreakToken).count
+    let markerBreakCount = words.filter(TeleprompterLineBreak.isMarkerBreakToken).count
+    let newlineBreakCount = words.filter { $0 == TeleprompterLineBreak.newlineToken }.count
 
     try expect(breakCount == 3, "Pipe, full-width pipe, and newline should become teleprompter breaks")
+    try expect(markerBreakCount == 2, "Pipe and full-width pipe should become marked breath breaks")
+    try expect(newlineBreakCount == 1, "Newlines should remain ordinary line breaks")
     try expect(!words.contains("|"), "ASCII pipe should not be displayed as a word")
     try expect(!words.contains("｜"), "Full-width pipe should not be displayed as a word")
     try expect(words.first == "先", "CJK words should still split into display characters")
@@ -432,8 +436,8 @@ func testTeleprompterLineBreakDeduplication() throws {
     let words = splitTextIntoWords("hello||｜\nworld")
 
     try expect(
-        words == ["hello", TeleprompterLineBreak.token, "world"],
-        "Consecutive explicit breaks should collapse to one visual break"
+        words == ["hello", TeleprompterLineBreak.markerToken, "world"],
+        "Consecutive explicit breaks should collapse to one marked visual break"
     )
 }
 
