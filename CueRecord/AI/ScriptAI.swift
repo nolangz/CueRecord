@@ -44,7 +44,7 @@ enum AIBreathMarkerMode: String, CaseIterable, Identifiable {
     var outputSummary: String {
         switch self {
         case .marked:
-            return "››  ｜  --(慢)"
+            return "››  ｜  --"
         case .clean:
             return "↵"
         }
@@ -55,17 +55,19 @@ enum AIBreathMarkerMode: String, CaseIterable, Identifiable {
         case .marked:
             return """
             - Return the same script with explicit rhythm markers where they help delivery.
+            - Optimize for high tempo contrast: use fast, normal, and slow passages to increase the standard deviation of speaking speed.
+            - Avoid making every line the same pace; an output with flat rhythm is bad.
             - Use " ｜" at natural breath points so the cut is visible and editable.
             - Use a line-leading "›› " before short bridge lines or low-importance lines that should be read faster.
-            - Use "--(慢) " immediately before important concepts, dense professional terms, or key claims that should be read slower.
+            - Use "-- " immediately before important concepts, dense professional terms, or key claims that should be read slower.
             - Use real newline characters for paragraph boundaries, markdown headings, and list items.
             - CueRecord treats "|" and "｜" as forced teleprompter line breaks; prefer the full-width "｜" form in AI output.
-            - Do not overuse "››" or "--(慢)"; only mark real pacing changes.
+            - Do not overuse "››" or "--"; only mark real pacing changes.
             """
         case .clean:
             return """
             - Return the same script with real newline characters inserted at natural breath points.
-            - Do not include "|", "｜", "››", or "--(慢)" in the output.
+            - Do not include "|", "｜", "››", or "--" in the output.
             - Use real newline characters for paragraph boundaries, markdown headings, list items, and breath cuts.
             """
         }
@@ -227,6 +229,7 @@ struct DeepSeekChatClient {
         Return only markdown. Do not wrap the answer in code fences. Do not mention that you are an AI.
         Preserve the original factual meaning, order, headings, and list structure as much as possible.
         Your job is to add speaker-friendly breath cuts, rhythm cues, and pacing spaces, not to rewrite or expand the script.
+        A strong result has visible tempo contrast and a high speaking-speed standard deviation.
         """
     }
 

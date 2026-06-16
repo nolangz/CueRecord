@@ -25,7 +25,7 @@ enum TeleprompterPaceCue {
     static let slowToken = "\u{E001}"
 
     private static let fastMarkers = ["››"]
-    private static let slowMarkers = ["--(慢)", "--（慢）"]
+    private static let slowMarkers = ["--(慢)", "--（慢）", "--"]
 
     nonisolated static func isCueToken(_ word: String) -> Bool {
         word == fastToken || word == slowToken

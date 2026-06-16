@@ -442,15 +442,22 @@ func testTeleprompterLineBreakDeduplication() throws {
 }
 
 func testTeleprompterPaceCueTokenization() throws {
-    let words = splitTextIntoWords("›› 快速带过｜--(慢)关键概念\n正常")
+    let words = splitTextIntoWords("›› 快速带过｜--关键概念\n正常")
 
     try expect(words.contains(TeleprompterPaceCue.fastToken), "Fast cue should become an internal token")
     try expect(words.contains(TeleprompterPaceCue.slowToken), "Slow cue should become an internal token")
     try expect(words.contains(TeleprompterLineBreak.markerToken), "Breath marker should remain a marked line break")
     try expect(words.contains(TeleprompterLineBreak.newlineToken), "Newline should remain an ordinary line break")
     try expect(!words.contains("››"), "Fast cue marker should not be displayed as a word")
-    try expect(!words.contains("--(慢)"), "Slow cue marker should not be displayed as a word")
+    try expect(!words.contains("--"), "Slow cue marker should not be displayed as a word")
     try expect(Array(words.suffix(2)) == ["正", "常"], "Text after pace cues should be preserved")
+}
+
+func testTeleprompterLegacySlowCueTokenization() throws {
+    let words = splitTextIntoWords("--(慢)旧稿兼容")
+
+    try expect(words.first == TeleprompterPaceCue.slowToken, "Legacy slow cue should still become an internal token")
+    try expect(!words.contains("--(慢)"), "Legacy slow cue marker should not be displayed as a word")
 }
 
 let tests: [(String, () throws -> Void)] = [
@@ -467,7 +474,8 @@ let tests: [(String, () throws -> Void)] = [
     ("CueRecordVaultRepairer", testCueRecordVaultRepairer),
     ("TeleprompterLineBreakTokenization", testTeleprompterLineBreakTokenization),
     ("TeleprompterLineBreakDeduplication", testTeleprompterLineBreakDeduplication),
-    ("TeleprompterPaceCueTokenization", testTeleprompterPaceCueTokenization)
+    ("TeleprompterPaceCueTokenization", testTeleprompterPaceCueTokenization),
+    ("TeleprompterLegacySlowCueTokenization", testTeleprompterLegacySlowCueTokenization)
 ]
 
 do {
