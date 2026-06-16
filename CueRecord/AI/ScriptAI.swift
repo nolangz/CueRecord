@@ -214,11 +214,21 @@ struct DeepSeekChatClient {
             throw AIScriptError.apiError("DeepSeek request failed (\(httpResponse.statusCode)): \(message)")
         }
 
-        let decoded = try JSONDecoder().decode(DeepSeekChatResponse.self, from: data)
-        guard let content = decoded.choices.first?.message.content.trimmingCharacters(in: .whitespacesAndNewlines),
-              !content.isEmpty
-        else {
-            throw AIScriptError.invalidResponse
+        let decoded: DeepSeekChatResponse
+        do {
+            decoded = try JSONDecoder().decode(DeepSeekChatResponse.self, from: data)
+        } catch {
+            throw AIScriptError.apiError("DeepSeek returned an unexpected response format: \(responseSnippet(from: data))")
+        }
+
+        guard let choice = decoded.choices.first else {
+            throw AIScriptError.apiError("DeepSeek returned no choices: \(responseSnippet(from: data))")
+        }
+
+        let content = sanitizeMarkdownResponse(choice.message.content ?? "")
+        guard !content.isEmpty else {
+            let reason = choice.finishReason.map { " Finish reason: \($0)." } ?? ""
+            throw AIScriptError.apiError("DeepSeek returned an empty draft.\(reason) Response: \(responseSnippet(from: data))")
         }
         return content
     }
@@ -226,7 +236,7 @@ struct DeepSeekChatClient {
     private var systemPrompt: String {
         """
         You are CueRecord's breath-cut editor for teleprompter scripts.
-        Return only markdown. Do not wrap the answer in code fences. Do not mention that you are an AI.
+        Return only the updated markdown draft. Do not wrap the answer in code fences. Do not mention that you are an AI.
         Preserve the original factual meaning, order, headings, and list structure as much as possible.
         Your job is to add speaker-friendly breath cuts, rhythm cues, and pacing spaces, not to rewrite or expand the script.
         A strong result has visible tempo contrast and a high speaking-speed standard deviation.
@@ -241,6 +251,8 @@ struct DeepSeekChatClient {
         \(request.customPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "None." : request.customPrompt)
 
         Output requirements:
+        - The entire response will be saved directly as a new .md file.
+        - Return only the updated script body. Do not include JSON, labels, comments, analysis, explanations, before/after sections, or validation notes.
         \(request.markerMode.promptInstructions)
         - Keep each spoken line short enough to read comfortably in a teleprompter.
         - For Chinese, prefer roughly 8-16 characters per spoken line unless meaning requires otherwise.
@@ -256,6 +268,33 @@ struct DeepSeekChatClient {
         \(request.sourceMarkdown)
         ---
         """
+    }
+
+    private func sanitizeMarkdownResponse(_ content: String) -> String {
+        let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasPrefix("```") else { return trimmed }
+
+        var lines = trimmed.components(separatedBy: .newlines)
+        guard lines.count >= 2,
+              lines.first?.hasPrefix("```") == true,
+              lines.last?.trimmingCharacters(in: .whitespacesAndNewlines) == "```"
+        else {
+            return trimmed
+        }
+
+        lines.removeFirst()
+        lines.removeLast()
+        return lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func responseSnippet(from data: Data) -> String {
+        let raw = String(data: data, encoding: .utf8) ?? "<non-UTF8 response>"
+        let collapsed = raw.replacingOccurrences(of: "\n", with: " ")
+        let limit = 500
+        if collapsed.count > limit {
+            return "\(collapsed.prefix(limit))..."
+        }
+        return collapsed
     }
 }
 
@@ -277,7 +316,7 @@ private struct DeepSeekChatRequest: Encodable {
 
 private struct DeepSeekChatMessage: Codable {
     let role: String
-    let content: String
+    let content: String?
 }
 
 private struct DeepSeekChatResponse: Decodable {
@@ -285,6 +324,12 @@ private struct DeepSeekChatResponse: Decodable {
 
     struct Choice: Decodable {
         let message: DeepSeekChatMessage
+        let finishReason: String?
+
+        enum CodingKeys: String, CodingKey {
+            case message
+            case finishReason = "finish_reason"
+        }
     }
 }
 

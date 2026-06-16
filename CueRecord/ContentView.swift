@@ -565,8 +565,8 @@ struct ContentView: View {
             AIScriptComposerSheet(
                 sourceTitle: service.pageTitle(at: service.currentPageIndex),
                 sourceMarkdown: service.currentPageText
-            ) { generatedMarkdown in
-                service.updatePageText(at: service.currentPageIndex, to: generatedMarkdown)
+            ) { generatedMarkdown, generatedTitle in
+                _ = service.addPage(text: generatedMarkdown, title: generatedTitle)
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .openSettings)) { _ in

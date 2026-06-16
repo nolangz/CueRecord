@@ -5,7 +5,7 @@ struct AIScriptComposerSheet: View {
 
     let sourceTitle: String
     let sourceMarkdown: String
-    let onGenerated: (String) -> Void
+    let onGenerated: (String, String) -> Void
 
     @State private var selectedModel: AIScriptModel = .deepSeekV4Flash
     @State private var breathMarkerMode: AIBreathMarkerMode = .marked
@@ -134,7 +134,7 @@ struct AIScriptComposerSheet: View {
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(Color.accentColor)
 
-                Text("Update current markdown")
+                Text("Create new markdown")
                     .font(.system(size: 13, weight: .medium))
 
                 Spacer()
@@ -239,7 +239,7 @@ struct AIScriptComposerSheet: View {
                         Text("Generating")
                     }
                 } else {
-                    Label("Apply Cuts", systemImage: "sparkles")
+                    Label("Create Draft", systemImage: "sparkles")
                 }
             }
             .buttonStyle(.borderedProminent)
@@ -278,12 +278,18 @@ struct AIScriptComposerSheet: View {
                 markerMode: breathMarkerMode
             )
             let script = try await client.generateBreathCuts(request: request, apiKey: resolvedAPIKey)
-            onGenerated(script)
+            onGenerated(script, generatedTitle)
             dismiss()
         } catch {
             errorMessage = error.localizedDescription
         }
 
         isGenerating = false
+    }
+
+    private var generatedTitle: String {
+        let trimmedSourceTitle = sourceTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        let base = trimmedSourceTitle.isEmpty ? "Untitled" : trimmedSourceTitle
+        return "AI Breath Cuts - \(base)"
     }
 }
