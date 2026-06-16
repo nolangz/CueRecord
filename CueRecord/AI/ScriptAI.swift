@@ -200,7 +200,6 @@ struct DeepSeekChatClient {
                 .init(role: "user", content: userPrompt(for: generationRequest))
             ],
             temperature: 0.25,
-            maxTokens: 3200,
             stream: false
         )
         urlRequest.httpBody = try JSONEncoder.deepSeekEncoder.encode(body)
@@ -223,6 +222,10 @@ struct DeepSeekChatClient {
 
         guard let choice = decoded.choices.first else {
             throw AIScriptError.apiError("DeepSeek returned no choices: \(responseSnippet(from: data))")
+        }
+
+        if choice.finishReason?.caseInsensitiveCompare("length") == .orderedSame {
+            throw AIScriptError.apiError("DeepSeek stopped because the response hit its length limit. No draft was created. Try a shorter source script or split it into sections.")
         }
 
         let content = sanitizeMarkdownResponse(choice.message.content ?? "")
@@ -302,14 +305,12 @@ private struct DeepSeekChatRequest: Encodable {
     let model: String
     let messages: [DeepSeekChatMessage]
     let temperature: Double
-    let maxTokens: Int
     let stream: Bool
 
     enum CodingKeys: String, CodingKey {
         case model
         case messages
         case temperature
-        case maxTokens = "max_tokens"
         case stream
     }
 }
