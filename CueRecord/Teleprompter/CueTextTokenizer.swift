@@ -11,12 +11,46 @@ enum TeleprompterLineBreak {
     static let token = markerToken
     static let markers: Set<Character> = ["|", "｜"]
 
-    static func isBreakToken(_ word: String) -> Bool {
+    nonisolated static func isBreakToken(_ word: String) -> Bool {
         word == markerToken || word == newlineToken
     }
 
-    static func isMarkerBreakToken(_ word: String) -> Bool {
+    nonisolated static func isMarkerBreakToken(_ word: String) -> Bool {
         word == markerToken
+    }
+}
+
+enum TeleprompterPaceCue {
+    static let fastToken = "\u{E000}"
+    static let slowToken = "\u{E001}"
+
+    private static let fastMarkers = ["››"]
+    private static let slowMarkers = ["--(慢)", "--（慢）"]
+
+    nonisolated static func isCueToken(_ word: String) -> Bool {
+        word == fastToken || word == slowToken
+    }
+
+    nonisolated static func isFastToken(_ word: String) -> Bool {
+        word == fastToken
+    }
+
+    nonisolated static func isSlowToken(_ word: String) -> Bool {
+        word == slowToken
+    }
+
+    nonisolated static func matchedCueToken(in text: String, at index: String.Index) -> (token: String, length: Int)? {
+        let suffix = text[index...]
+
+        if let marker = fastMarkers.first(where: { suffix.hasPrefix($0) }) {
+            return (fastToken, marker.count)
+        }
+
+        if let marker = slowMarkers.first(where: { suffix.hasPrefix($0) }) {
+            return (slowToken, marker.count)
+        }
+
+        return nil
     }
 }
 
@@ -81,7 +115,16 @@ func splitTextIntoWords(_ text: String) -> [String] {
         result.append(breakToken)
     }
 
-    for char in text {
+    var index = text.startIndex
+    while index < text.endIndex {
+        if let cue = TeleprompterPaceCue.matchedCueToken(in: text, at: index) {
+            flushBuffer()
+            result.append(cue.token)
+            index = text.index(index, offsetBy: cue.length)
+            continue
+        }
+
+        let char = text[index]
         if TeleprompterLineBreak.markers.contains(char) {
             flushBuffer()
             appendBreak(TeleprompterLineBreak.markerToken)
@@ -93,6 +136,7 @@ func splitTextIntoWords(_ text: String) -> [String] {
         } else {
             buffer.append(char)
         }
+        index = text.index(after: index)
     }
 
     flushBuffer()

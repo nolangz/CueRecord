@@ -8,12 +8,22 @@ import SwiftUI
 
 // MARK: - Data
 
+enum TeleprompterWordPace {
+    case normal
+    case slow
+}
+
 struct WordItem: Identifiable {
     let id: Int
     let word: String
+    let displayText: String
     let charOffset: Int // char offset of this word in the full text (counting spaces)
     let isAnnotation: Bool // true for [bracket] words and emoji-only words
     let isLineBreak: Bool
+    let isCueDirective: Bool
+    let isFastCue: Bool
+    let isSlowCue: Bool
+    let pace: TeleprompterWordPace
 }
 
 // MARK: - Preference key to report word Y positions
@@ -348,7 +358,7 @@ struct WordFlowLayout: View {
     // Find the index of the next word to read (first non-fully-lit, non-annotation word)
     private func nextWordIndex(items: [WordItem]) -> Int {
         for item in items {
-            if item.isAnnotation || item.isLineBreak { continue }
+            if item.isAnnotation || item.isLineBreak || item.isCueDirective { continue }
             let charsIntoWord = highlightedCharCount - item.charOffset
             let litCount = max(0, min(item.word.count, charsIntoWord))
             let letterCount = max(1, item.word.filter { $0.isLetter || $0.isNumber }.count)
@@ -399,6 +409,7 @@ struct WordFlowLayout: View {
         .coordinateSpace(name: "flowLayout")
     }
 
+    @ViewBuilder
     private func wordView(for item: WordItem, isNextWord: Bool) -> some View {
         let wordLen = item.word.count
         let charsIntoWord = highlightedCharCount - item.charOffset
@@ -406,16 +417,16 @@ struct WordFlowLayout: View {
         let letterCount = max(1, item.word.filter { $0.isLetter || $0.isNumber }.count)
         let isFullyLit = litCount >= letterCount
         let isCurrentWord = isNextWord || (charsIntoWord >= 0 && !isFullyLit)
+        let displayText = item.displayText + " "
+        let isSlow = item.pace == .slow
+        let slowTracking = isSlow ? max(1.5, font.pointSize * 0.08) : 0
 
         // When highlighting is off (classic/silence-paused), use uniform color
         if !highlightWords {
-            let uniformColor: Color = item.isAnnotation
-                ? cueColor.opacity(cueUnreadOpacity)
-                : highlightColor
-
-            return Text(item.word + " ")
-                .font(item.isAnnotation ? Font(font).italic() : Font(font))
-                .foregroundStyle(uniformColor)
+            Text(displayText)
+                .font(displayFont(for: item))
+                .foregroundStyle(uniformColor(for: item, isSlow: isSlow))
+                .tracking(slowTracking)
                 .background(
                     GeometryReader { wordGeo in
                         Color.clear.preference(
@@ -428,15 +439,18 @@ struct WordFlowLayout: View {
                 .onTapGesture {
                     onWordTap?(item.charOffset)
                 }
-        }
-
-        // Annotations: italic, dimmed with cue color
-        if item.isAnnotation {
+        } else if item.isFastCue {
+            Text(displayText)
+                .font(.system(size: max(11, font.pointSize * 0.72), weight: .bold, design: .rounded))
+                .foregroundStyle(Color(red: 0.48, green: 0.72, blue: 1.0).opacity(0.9))
+                .padding(.trailing, 4)
+        } else if item.isAnnotation {
+            // Annotations: italic, dimmed with cue color
             let annotationColor: Color = isFullyLit
                 ? cueColor.opacity(cueReadOpacity)
                 : cueColor.opacity(cueUnreadOpacity)
 
-            return Text(item.word + " ")
+            Text(displayText)
                 .font(Font(font).italic())
                 .foregroundStyle(annotationColor)
                 .background(
@@ -451,41 +465,98 @@ struct WordFlowLayout: View {
                 .onTapGesture {
                     onWordTap?(item.charOffset)
                 }
+        } else {
+            // Dim color: highlight color variant for current word, full for unread
+            let dimColor: Color = isCurrentWord
+                ? highlightColor.opacity(0.6)
+                : highlightColor
+
+            // Base color for the whole word
+            let wordColor: Color = isSlow
+                ? (isFullyLit ? Color(red: 1.0, green: 0.78, blue: 0.35).opacity(0.38) : Color(red: 1.0, green: 0.78, blue: 0.35).opacity(isCurrentWord ? 0.78 : 0.95))
+                : (isFullyLit ? highlightColor.opacity(0.3) : dimColor)
+
+            Text(displayText)
+                .font(Font(font))
+                .foregroundStyle(wordColor)
+                .tracking(slowTracking)
+                .underline(isCurrentWord, color: wordColor)
+                .background(
+                    GeometryReader { wordGeo in
+                        Color.clear.preference(
+                            key: WordYPreferenceKey.self,
+                            value: [item.id: wordGeo.frame(in: .named("flowLayout")).midY]
+                        )
+                    }
+                )
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    onWordTap?(item.charOffset)
+                }
+        }
+    }
+
+    private func displayFont(for item: WordItem) -> Font {
+        if item.isFastCue {
+            return .system(size: max(11, font.pointSize * 0.72), weight: .bold, design: .rounded)
         }
 
-        // Dim color: highlight color variant for current word, full for unread
-        let dimColor: Color = isCurrentWord
-            ? highlightColor.opacity(0.6)
-            : highlightColor
+        if item.isAnnotation {
+            return Font(font).italic()
+        }
 
-        // Base color for the whole word
-        let wordColor: Color = isFullyLit ? highlightColor.opacity(0.3) : dimColor
+        return Font(font)
+    }
 
-        return Text(item.word + " ")
-            .font(Font(font))
-            .foregroundStyle(wordColor)
-            .underline(isCurrentWord, color: wordColor)
-            .background(
-                GeometryReader { wordGeo in
-                    Color.clear.preference(
-                        key: WordYPreferenceKey.self,
-                        value: [item.id: wordGeo.frame(in: .named("flowLayout")).midY]
-                    )
-                }
-            )
-            .contentShape(Rectangle())
-            .onTapGesture {
-                onWordTap?(item.charOffset)
-            }
+    private func uniformColor(for item: WordItem, isSlow: Bool) -> Color {
+        if item.isFastCue {
+            return Color(red: 0.48, green: 0.72, blue: 1.0).opacity(0.85)
+        }
+
+        if isSlow {
+            return Color(red: 1.0, green: 0.78, blue: 0.35).opacity(0.92)
+        }
+
+        if item.isAnnotation {
+            return cueColor.opacity(cueUnreadOpacity)
+        }
+
+        return highlightColor
     }
 
     private func buildItems() -> [WordItem] {
         var items: [WordItem] = []
         var offset = 0
+        var pace: TeleprompterWordPace = .normal
         for (i, word) in words.enumerated() {
             let isLineBreak = TeleprompterLineBreak.isBreakToken(word)
-            let isAnnotation = isLineBreak || Self.isAnnotationWord(word)
-            items.append(WordItem(id: i, word: word, charOffset: offset, isAnnotation: isAnnotation, isLineBreak: isLineBreak))
+            let isFastCue = TeleprompterPaceCue.isFastToken(word)
+            let isSlowCue = TeleprompterPaceCue.isSlowToken(word)
+            let isCueDirective = TeleprompterPaceCue.isCueToken(word)
+            let isAnnotation = isLineBreak || isCueDirective || Self.isAnnotationWord(word)
+            let displayText = isFastCue ? "››" : word
+
+            if isLineBreak {
+                pace = .normal
+            }
+
+            items.append(WordItem(
+                id: i,
+                word: word,
+                displayText: displayText,
+                charOffset: offset,
+                isAnnotation: isAnnotation,
+                isLineBreak: isLineBreak,
+                isCueDirective: isCueDirective,
+                isFastCue: isFastCue,
+                isSlowCue: isSlowCue,
+                pace: pace
+            ))
+
+            if isSlowCue {
+                pace = .slow
+            }
+
             offset += word.count + 1 // +1 for space
         }
         return items
@@ -506,6 +577,10 @@ struct WordFlowLayout: View {
         let spaceWidth = (" " as NSString).size(withAttributes: [.font: font]).width
 
         for item in items {
+            if item.isSlowCue {
+                continue
+            }
+
             if item.isLineBreak {
                 if !lines[lines.count - 1].isEmpty {
                     lines.append([])
@@ -514,7 +589,15 @@ struct WordFlowLayout: View {
                 continue
             }
 
-            let wordWidth = (item.word as NSString).size(withAttributes: [.font: font]).width + spaceWidth
+            if item.isFastCue, !lines[lines.count - 1].isEmpty {
+                lines.append([])
+                currentLineWidth = 0
+            }
+
+            let tracking = item.pace == .slow ? max(1.5, font.pointSize * 0.08) : 0
+            let displayWidth = (item.displayText as NSString).size(withAttributes: [.font: font]).width
+            let trackingWidth = max(0, CGFloat(max(0, item.displayText.count - 1)) * tracking)
+            let wordWidth = displayWidth + trackingWidth + spaceWidth
             if currentLineWidth + wordWidth > containerWidth && !lines[lines.count - 1].isEmpty {
                 lines.append([])
                 currentLineWidth = 0

@@ -441,6 +441,18 @@ func testTeleprompterLineBreakDeduplication() throws {
     )
 }
 
+func testTeleprompterPaceCueTokenization() throws {
+    let words = splitTextIntoWords("›› 快速带过｜--(慢)关键概念\n正常")
+
+    try expect(words.contains(TeleprompterPaceCue.fastToken), "Fast cue should become an internal token")
+    try expect(words.contains(TeleprompterPaceCue.slowToken), "Slow cue should become an internal token")
+    try expect(words.contains(TeleprompterLineBreak.markerToken), "Breath marker should remain a marked line break")
+    try expect(words.contains(TeleprompterLineBreak.newlineToken), "Newline should remain an ordinary line break")
+    try expect(!words.contains("››"), "Fast cue marker should not be displayed as a word")
+    try expect(!words.contains("--(慢)"), "Slow cue marker should not be displayed as a word")
+    try expect(Array(words.suffix(2)) == ["正", "常"], "Text after pace cues should be preserved")
+}
+
 let tests: [(String, () throws -> Void)] = [
     ("AudioStartGate", testAudioStartGate),
     ("BoundedDropOldestBuffer", testBoundedDropOldestBuffer),
@@ -454,7 +466,8 @@ let tests: [(String, () throws -> Void)] = [
     ("CueRecordTempVaultWorkflow", testCueRecordTempVaultWorkflow),
     ("CueRecordVaultRepairer", testCueRecordVaultRepairer),
     ("TeleprompterLineBreakTokenization", testTeleprompterLineBreakTokenization),
-    ("TeleprompterLineBreakDeduplication", testTeleprompterLineBreakDeduplication)
+    ("TeleprompterLineBreakDeduplication", testTeleprompterLineBreakDeduplication),
+    ("TeleprompterPaceCueTokenization", testTeleprompterPaceCueTokenization)
 ]
 
 do {
