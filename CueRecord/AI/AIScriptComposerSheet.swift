@@ -14,6 +14,8 @@ struct AIScriptComposerSheet: View {
     @State private var customBaseURL = AIScriptModelSelectionStorage.customBaseURL()
     @State private var customModelID = AIScriptModelSelectionStorage.customModelID()
     @State private var customProviderRequiresAPIKey = AIScriptModelSelectionStorage.customProviderRequiresAPIKey()
+    @State private var providerSearch = ""
+    @State private var modelSearch = ""
     @State private var breathMarkerMode: AIBreathMarkerMode = .marked
     @State private var customPrompt = ""
     @State private var apiKey = ""
@@ -22,6 +24,7 @@ struct AIScriptComposerSheet: View {
     @State private var errorMessage: String?
 
     private let keyStore = AIProviderAPIKeyStore.shared
+    private let maxVisibleModelResults = 120
 
     private var selectedProvider: AIScriptProvider {
         AIScriptProviderCatalog.provider(for: selectedProviderID)
@@ -64,6 +67,39 @@ struct AIScriptComposerSheet: View {
         return selectedModelPreset?.localizedShortDescription ?? ""
     }
 
+    private var filteredProviders: [AIScriptProvider] {
+        AIScriptProviderCatalog.providers.filter { provider in
+            matchesSearch(
+                providerSearch,
+                values: [provider.displayName, provider.id, provider.shortDescription]
+            )
+        }
+    }
+
+    private var filteredModelPresets: [AIScriptModelPreset] {
+        selectedProvider.modelPresets.filter { model in
+            matchesSearch(
+                modelSearch,
+                values: [model.displayName, model.id, model.shortDescription]
+            )
+        }
+    }
+
+    private var visibleModelPresets: [AIScriptModelPreset] {
+        Array(filteredModelPresets.prefix(maxVisibleModelResults))
+    }
+
+    private var customModelMatchesSearch: Bool {
+        matchesSearch(
+            modelSearch,
+            values: [
+                AIScriptProviderCatalog.customModelPreset.displayName,
+                AIScriptProviderCatalog.customModelPreset.shortDescription,
+                "custom"
+            ]
+        )
+    }
+
     private var hasSavedAPIKey: Bool {
         keyStore.hasAPIKey(for: activeKeychainAccount)
     }
@@ -91,9 +127,9 @@ struct AIScriptComposerSheet: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     modelSection
+                    apiKeySection
                     outputSection
                     promptSection
-                    apiKeySection
 
                     if let errorMessage {
                         Text(errorMessage)
@@ -109,13 +145,14 @@ struct AIScriptComposerSheet: View {
 
             footer
         }
-        .frame(width: 560, height: 640)
+        .frame(width: 620, height: 720)
         .background(.ultraThinMaterial)
         .onAppear {
             refreshAPIKeyEditingState()
         }
         .onChange(of: selectedProviderID) { _, _ in
             selectedModelID = AIScriptProviderCatalog.defaultModelID(for: selectedProvider)
+            modelSearch = ""
             refreshAPIKeyEditingState()
         }
         .onChange(of: customBaseURL) { _, _ in
@@ -169,13 +206,10 @@ struct AIScriptComposerSheet: View {
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(.secondary)
 
-            Picker(t("Provider"), selection: $selectedProviderID) {
-                ForEach(AIScriptProviderCatalog.providers) { provider in
-                    Text(t(provider.displayName)).tag(provider.id)
-                }
-            }
-            .pickerStyle(.menu)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            TextField(t("Search providers"), text: $providerSearch)
+                .textFieldStyle(.roundedBorder)
+
+            providerResultsList
 
             Text(t(selectedProvider.shortDescription))
                 .font(.system(size: 11))
@@ -183,33 +217,141 @@ struct AIScriptComposerSheet: View {
 
             if usesCustomProvider {
                 customProviderSection
-            } else {
-                Text(t("Model"))
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .padding(.top, 4)
-
-                Picker(t("Model"), selection: $selectedModelID) {
-                    ForEach(selectedProvider.modelPresets) { model in
-                        Text(model.displayName).tag(model.id)
-                    }
-                    Divider()
-                    Text(t(AIScriptProviderCatalog.customModelPreset.displayName))
-                        .tag(AIScriptProviderCatalog.customModelID)
-                }
-                .pickerStyle(.menu)
-                .frame(maxWidth: .infinity, alignment: .leading)
             }
 
-            if usesCustomModel {
+            Text(t("Model"))
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .padding(.top, 4)
+
+            if usesCustomProvider {
                 TextField(t("Model ID"), text: $customModelID)
                     .textFieldStyle(.roundedBorder)
+            } else {
+                TextField(t("Search models"), text: $modelSearch)
+                    .textFieldStyle(.roundedBorder)
+
+                modelResultsList
+
+                if usesCustomModel {
+                    TextField(t("Model ID"), text: $customModelID)
+                        .textFieldStyle(.roundedBorder)
+                }
             }
 
             Text(selectedModelDescription)
                 .font(.system(size: 11))
                 .foregroundStyle(.tertiary)
         }
+    }
+
+    private var providerResultsList: some View {
+        ScrollView {
+            LazyVStack(spacing: 4) {
+                ForEach(filteredProviders) { provider in
+                    providerRow(provider)
+                }
+            }
+            .padding(6)
+        }
+        .frame(height: 142)
+        .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
+    private var modelResultsList: some View {
+        ScrollView {
+            LazyVStack(spacing: 4) {
+                ForEach(visibleModelPresets) { model in
+                    modelRow(model)
+                }
+
+                if filteredModelPresets.count > maxVisibleModelResults {
+                    Text(interfaceLanguage.format("Showing first %@ models. Type to narrow.", "\(maxVisibleModelResults)"))
+                        .font(.system(size: 11))
+                        .foregroundStyle(.tertiary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                }
+
+                if customModelMatchesSearch {
+                    Divider()
+                        .padding(.vertical, 2)
+                    modelRow(AIScriptProviderCatalog.customModelPreset)
+                }
+            }
+            .padding(6)
+        }
+        .frame(height: 188)
+        .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
+    private func providerRow(_ provider: AIScriptProvider) -> some View {
+        Button {
+            selectedProviderID = provider.id
+        } label: {
+            HStack(spacing: 9) {
+                Image(systemName: selectedProviderID == provider.id ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(selectedProviderID == provider.id ? Color.accentColor : Color.secondary)
+                    .frame(width: 16)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(t(provider.displayName))
+                        .font(.system(size: 12, weight: .medium))
+                        .lineLimit(1)
+                    Text(provider.id)
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                }
+
+                Spacer()
+
+                Text("\(provider.modelPresets.count)")
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .background(
+                selectedProviderID == provider.id ? Color.accentColor.opacity(0.12) : Color.clear,
+                in: RoundedRectangle(cornerRadius: 6, style: .continuous)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func modelRow(_ model: AIScriptModelPreset) -> some View {
+        Button {
+            selectedModelID = model.id
+        } label: {
+            HStack(spacing: 9) {
+                Image(systemName: selectedModelID == model.id ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(selectedModelID == model.id ? Color.accentColor : Color.secondary)
+                    .frame(width: 16)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(t(model.displayName))
+                        .font(.system(size: 12, weight: .medium))
+                        .lineLimit(1)
+                    Text(model.id)
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                }
+
+                Spacer()
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .background(
+                selectedModelID == model.id ? Color.accentColor.opacity(0.12) : Color.clear,
+                in: RoundedRectangle(cornerRadius: 6, style: .continuous)
+            )
+        }
+        .buttonStyle(.plain)
     }
 
     private var customProviderSection: some View {
@@ -435,6 +577,20 @@ struct AIScriptComposerSheet: View {
         apiKey = ""
         shouldSaveAPIKey = true
         isEditingAPIKey = !hasSavedAPIKey
+    }
+
+    private func matchesSearch(_ query: String, values: [String]) -> Bool {
+        let terms = query
+            .split(whereSeparator: { $0.isWhitespace })
+            .map(String.init)
+
+        guard !terms.isEmpty else { return true }
+
+        return terms.allSatisfy { term in
+            values.contains { value in
+                value.localizedCaseInsensitiveContains(term)
+            }
+        }
     }
 
     private var generatedTitle: String {
