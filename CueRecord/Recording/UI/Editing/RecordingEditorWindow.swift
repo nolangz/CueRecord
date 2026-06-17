@@ -490,8 +490,6 @@ private struct RecordingEditorView: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-
-                topRightActions
             }
             .padding(.horizontal, 20)
             .padding(.top, 18)
@@ -530,6 +528,9 @@ private struct RecordingEditorView: View {
     private var inspector: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
+                topRightActions
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+
                 currentCutSummary
 
                 modeSection
