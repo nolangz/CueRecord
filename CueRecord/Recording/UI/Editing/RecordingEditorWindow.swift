@@ -441,7 +441,7 @@ private struct RecordingEditorView: View {
             Divider()
 
             RecordingEditorTimeline(session: session)
-                .frame(height: 176)
+                .frame(height: 220)
 
             Divider()
 
@@ -698,17 +698,19 @@ private struct RecordingEditorTimeline: View {
     @ObservedObject private var interfaceLanguage = InterfaceLanguageSettings.shared
     @ObservedObject var session: RecordingEditSession
 
-    private let gutterWidth: CGFloat = 72
-    private let horizontalPadding: CGFloat = 16
+    private let trackHeaderWidth: CGFloat = 84
+    private let horizontalPadding: CGFloat = 12
     private let rulerHeight: CGFloat = 34
-    private let trackHeight: CGFloat = 58
+    private let trackHeight: CGFloat = 72
+    private let minimumPixelsPerSecond: CGFloat = 48
+    private let maximumContentWidth: CGFloat = 18_000
 
     private func t(_ english: String) -> String {
         interfaceLanguage.text(english)
     }
 
     var body: some View {
-        VStack(spacing: 10) {
+        VStack(spacing: 0) {
             HStack(spacing: 10) {
                 Label(t("Timeline"), systemImage: "film.stack")
                     .font(.system(size: 13, weight: .semibold))
@@ -734,62 +736,110 @@ private struct RecordingEditorTimeline: View {
                 .help(t("Delete Cut"))
             }
             .padding(.horizontal, horizontalPadding)
+            .frame(height: 42)
+
+            Divider()
 
             GeometryReader { geometry in
-                let contentWidth = max(geometry.size.width - gutterWidth - horizontalPadding * 2, 1)
                 let duration = max(session.duration, 0.1)
-                let playheadX = gutterWidth + horizontalPadding + contentWidth * CGFloat(session.playheadTime / duration)
+                let viewportWidth = max(geometry.size.width - trackHeaderWidth - horizontalPadding * 2, 1)
+                let desiredContentWidth = max(viewportWidth, CGFloat(duration) * minimumPixelsPerSecond)
+                let contentWidth = min(desiredContentWidth, max(viewportWidth, maximumContentWidth))
 
-                ZStack(alignment: .topLeading) {
-                    HStack(spacing: 10) {
+                VStack(spacing: 0) {
+                    HStack(spacing: 0) {
                         trackGutter
-                            .frame(width: gutterWidth, height: rulerHeight + trackHeight)
+                            .frame(width: trackHeaderWidth, height: rulerHeight + trackHeight)
 
-                        ZStack(alignment: .topLeading) {
-                            timelineRuler(width: contentWidth, duration: duration)
-                                .frame(width: contentWidth, height: rulerHeight)
+                        ScrollView(.horizontal, showsIndicators: true) {
+                            ZStack(alignment: .topLeading) {
+                                timelineRuler(width: contentWidth, duration: duration)
+                                    .frame(width: contentWidth, height: rulerHeight)
 
-                            timelineTrack(width: contentWidth, duration: duration)
-                                .frame(width: contentWidth, height: trackHeight)
-                                .offset(y: rulerHeight)
+                                timelineTrack(width: contentWidth, duration: duration)
+                                    .frame(width: contentWidth, height: trackHeight)
+                                    .offset(y: rulerHeight)
+
+                                playhead(height: rulerHeight + trackHeight)
+                                    .offset(x: contentWidth * CGFloat(session.playheadTime / duration), y: 0)
+                            }
+                            .frame(width: contentWidth, height: rulerHeight + trackHeight, alignment: .topLeading)
                         }
                     }
                     .padding(.horizontal, horizontalPadding)
 
-                    playhead
-                        .offset(x: playheadX, y: 6)
+                    Spacer(minLength: 0)
                 }
+                .padding(.top, 10)
             }
         }
-        .padding(.top, 12)
-        .padding(.bottom, 14)
+        .padding(.bottom, 10)
         .background(.bar)
     }
 
     private var trackGutter: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            Spacer()
-                .frame(height: rulerHeight - 3)
-            HStack(spacing: 7) {
-                Image(systemName: "film")
-                    .font(.system(size: 13, weight: .semibold))
-                    .frame(width: 22, height: 22)
-                    .background(Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-                VStack(alignment: .leading, spacing: 1) {
+        VStack(spacing: 0) {
+            HStack {
+                Text("TC")
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.tertiary)
+                Spacer()
+            }
+            .padding(.horizontal, 10)
+            .frame(height: rulerHeight)
+            .background(Color.primary.opacity(0.035))
+
+            HStack(spacing: 8) {
+                Text("V1")
+                    .font(.caption.monospacedDigit().weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 24, alignment: .leading)
+
+                VStack(alignment: .leading, spacing: 2) {
                     Text(t("Clip"))
-                        .font(.system(size: 11, weight: .semibold))
-                    Text("\(session.cuts.count)")
+                        .font(.caption.weight(.semibold))
+                        .lineLimit(1)
+                    Text("\(session.cuts.count) \(t("Cuts"))")
                         .font(.caption2.monospacedDigit())
                         .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
+
+                Spacer(minLength: 0)
             }
+            .padding(.horizontal, 10)
             .frame(height: trackHeight)
+            .background(Color.primary.opacity(0.025))
+        }
+        .overlay(alignment: .trailing) {
+            Rectangle()
+                .fill(Color.secondary.opacity(0.18))
+                .frame(width: 1)
+        }
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(Color.secondary.opacity(0.14))
+                .frame(height: 1)
         }
     }
 
     private func timelineRuler(width: CGFloat, duration: Double) -> some View {
-        ZStack(alignment: .bottomLeading) {
-            ForEach(rulerTicks(for: duration), id: \.self) { tick in
+        let majorTicks = rulerTicks(for: duration)
+        let majorInterval = tickInterval(for: duration)
+
+        return ZStack(alignment: .bottomLeading) {
+            Rectangle()
+                .fill(Color.primary.opacity(0.025))
+
+            ForEach(minorTicks(for: duration, majorInterval: majorInterval), id: \.self) { tick in
+                let x = width * CGFloat(tick / duration)
+                Rectangle()
+                    .fill(Color.secondary.opacity(0.14))
+                    .frame(width: 1, height: 5)
+                    .offset(x: x, y: -1)
+            }
+
+            ForEach(majorTicks, id: \.self) { tick in
                 let x = width * CGFloat(tick / duration)
                 VStack(spacing: 4) {
                     Text(timeString(tick))
@@ -804,18 +854,24 @@ private struct RecordingEditorTimeline: View {
             }
 
             Rectangle()
-                .fill(Color.secondary.opacity(0.20))
+                .fill(Color.secondary.opacity(0.18))
                 .frame(height: 1)
         }
     }
 
     private func timelineTrack(width: CGFloat, duration: Double) -> some View {
-        ZStack(alignment: .leading) {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color.primary.opacity(0.055))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .strokeBorder(Color.primary.opacity(0.08))
+        ZStack(alignment: .topLeading) {
+            Rectangle()
+                .fill(Color.primary.opacity(0.035))
+                .overlay(alignment: .top) {
+                    Rectangle()
+                        .fill(Color.secondary.opacity(0.14))
+                        .frame(height: 1)
+                }
+                .overlay(alignment: .bottom) {
+                    Rectangle()
+                        .fill(Color.secondary.opacity(0.14))
+                        .frame(height: 1)
                 }
                 .contentShape(Rectangle())
                 .gesture(
@@ -825,6 +881,14 @@ private struct RecordingEditorTimeline: View {
                             session.seek(to: Double(fraction) * duration, selectingCut: true)
                         }
                 )
+
+            ForEach(rulerTicks(for: duration), id: \.self) { tick in
+                let x = width * CGFloat(tick / duration)
+                Rectangle()
+                    .fill(Color.secondary.opacity(0.08))
+                    .frame(width: 1, height: trackHeight)
+                    .offset(x: x)
+            }
 
             ForEach(Array(session.cuts.enumerated()), id: \.element.id) { index, cut in
                 let x = width * CGFloat(cut.startTime / duration)
@@ -851,44 +915,67 @@ private struct RecordingEditorTimeline: View {
                         }
                     }
                 )
-                .offset(x: x)
+                .offset(x: x, y: 12)
             }
         }
     }
 
-    private var playhead: some View {
+    private func playhead(height: CGFloat) -> some View {
         VStack(spacing: 0) {
-            Circle()
-                .fill(Color.red)
-                .frame(width: 11, height: 11)
-                .shadow(color: .black.opacity(0.20), radius: 3, y: 1)
+            Image(systemName: "triangle.fill")
+                .font(.system(size: 8, weight: .bold))
+                .foregroundStyle(Color.red)
+                .rotationEffect(Angle(degrees: 180))
+                .frame(width: 12, height: 10)
+                .shadow(color: Color.black.opacity(0.20), radius: 3, y: 1)
             Rectangle()
                 .fill(
                     LinearGradient(
-                        colors: [Color.red, Color.red.opacity(0.26), Color.red.opacity(0.0)],
+                        colors: [Color.red, Color.red.opacity(0.62), Color.red.opacity(0.18)],
                         startPoint: .top,
                         endPoint: .bottom
                     )
                 )
-                .frame(width: 2, height: rulerHeight + trackHeight - 3)
+                .frame(width: 2, height: height - 10)
         }
-        .offset(x: -5.5)
+        .offset(x: -6)
         .allowsHitTesting(false)
         .accessibilityLabel(t("Playhead"))
     }
 
+    private func tickInterval(for duration: Double) -> Double {
+        let target = duration / 7
+        let candidates: [Double] = [1, 2, 5, 10, 15, 30, 60, 120, 300, 600]
+        return candidates.first { $0 >= target } ?? 600
+    }
+
     private func rulerTicks(for duration: Double) -> [Double] {
-        let tickCount = min(max(Int(duration / 8), 3), 7)
-        guard tickCount > 1 else { return [0, duration] }
+        let interval = tickInterval(for: duration)
+        let tickCount = max(Int(ceil(duration / interval)), 1)
         return (0...tickCount).map { index in
-            duration * Double(index) / Double(tickCount)
+            min(Double(index) * interval, duration)
         }
+    }
+
+    private func minorTicks(for duration: Double, majorInterval: Double) -> [Double] {
+        let minorInterval = max(majorInterval / 5, 0.1)
+        let tickCount = max(Int(ceil(duration / minorInterval)), 1)
+        return (0...tickCount)
+            .map { min(Double($0) * minorInterval, duration) }
+            .filter { tick in
+                let remainder = tick.truncatingRemainder(dividingBy: majorInterval)
+                return remainder > 0.001 && abs(remainder - majorInterval) > 0.001
+            }
     }
 
     private func timeString(_ seconds: Double) -> String {
         let safeSeconds = max(0, seconds)
-        let minutes = Int(safeSeconds) / 60
+        let hours = Int(safeSeconds) / 3600
+        let minutes = (Int(safeSeconds) / 60) % 60
         let wholeSeconds = Int(safeSeconds) % 60
+        if hours > 0 {
+            return String(format: "%02d:%02d:%02d", hours, minutes, wholeSeconds)
+        }
         return String(format: "%02d:%02d", minutes, wholeSeconds)
     }
 }
@@ -912,24 +999,33 @@ private struct RecordingTimelineCutSegment: View {
     }
 
     var body: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(segmentGradient)
+        ZStack(alignment: .leading) {
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .fill(segmentColor.opacity(isSelected ? 0.92 : 0.78))
                 .overlay {
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .strokeBorder(isSelected ? Color.white.opacity(0.92) : Color.white.opacity(0.20), lineWidth: isSelected ? 1.5 : 1)
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .strokeBorder(
+                            isSelected ? Color.white.opacity(0.94) : Color.white.opacity(0.22),
+                            lineWidth: isSelected ? 1.5 : 1
+                        )
                 }
-                .shadow(color: .black.opacity(isSelected ? 0.24 : 0.12), radius: isSelected ? 8 : 4, y: 3)
+                .overlay(alignment: .top) {
+                    Rectangle()
+                        .fill(Color.white.opacity(0.18))
+                        .frame(height: 1)
+                        .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                }
+                .shadow(color: .black.opacity(isSelected ? 0.20 : 0.08), radius: isSelected ? 5 : 2, y: 2)
 
             HStack(spacing: 8) {
                 if width > 64 {
                     Image(systemName: cut.layoutMode.systemImage)
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.86))
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.88))
                 }
 
                 if width > 112 {
-                    VStack(spacing: 1) {
+                    VStack(alignment: .leading, spacing: 1) {
                         Text("\(t("Cut")) \(index + 1)")
                             .font(.system(size: 11, weight: .semibold))
                             .foregroundStyle(.white)
@@ -941,39 +1037,27 @@ private struct RecordingTimelineCutSegment: View {
                     }
                 }
             }
-            .padding(.horizontal, 16)
+            .padding(.horizontal, 12)
 
             trimHandle(.start)
                 .frame(maxWidth: .infinity, alignment: .leading)
             trimHandle(.end)
                 .frame(maxWidth: .infinity, alignment: .trailing)
         }
-        .frame(width: width, height: 50)
+        .frame(width: width, height: 48)
         .contentShape(Rectangle())
         .onTapGesture(perform: onSelect)
         .accessibilityLabel("\(t("Cut")) \(index + 1), \(t(cut.layoutMode.shortLabel))")
     }
 
-    private var segmentGradient: LinearGradient {
+    private var segmentColor: Color {
         switch cut.layoutMode {
         case .cameraFullScreen:
-            return LinearGradient(
-                colors: [Color.pink.opacity(0.82), Color.purple.opacity(0.78)],
-                startPoint: .leading,
-                endPoint: .trailing
-            )
+            return Color.purple
         case .screenFullScreen:
-            return LinearGradient(
-                colors: [Color.accentColor.opacity(0.86), Color.blue.opacity(0.70)],
-                startPoint: .leading,
-                endPoint: .trailing
-            )
+            return Color.accentColor
         case .screenWithCamera:
-            return LinearGradient(
-                colors: [Color.teal.opacity(0.82), Color.accentColor.opacity(0.78)],
-                startPoint: .leading,
-                endPoint: .trailing
-            )
+            return Color.teal
         }
     }
 
@@ -985,11 +1069,11 @@ private struct RecordingTimelineCutSegment: View {
     private func trimHandle(_ edge: TrimEdge) -> some View {
         Rectangle()
             .fill(Color.clear)
-            .frame(width: 24, height: 50)
+            .frame(width: 24, height: 48)
             .overlay {
                 Capsule()
-                    .fill(Color.white.opacity(isSelected ? 0.82 : 0.46))
-                    .frame(width: 3, height: 30)
+                    .fill(Color.white.opacity(isSelected ? 0.86 : 0.42))
+                    .frame(width: 3, height: 28)
             }
             .contentShape(Rectangle())
             .gesture(
