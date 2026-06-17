@@ -147,7 +147,7 @@ private final class RecordingEditSession: ObservableObject {
         return cuts.first { $0.id == selectedCutID } ?? cuts.first
     }
 
-    var canDeleteSelectedCut: Bool {
+    var canMergeSelectedCut: Bool {
         cuts.count > 1
     }
 
@@ -177,9 +177,7 @@ private final class RecordingEditSession: ObservableObject {
     }
 
     func addCut() {
-        guard let selectedCut,
-              let index = cuts.firstIndex(where: { $0.id == selectedCut.id })
-        else {
+        guard !cuts.isEmpty else {
             let cut = RecordingEditCut(
                 startTime: 0,
                 endTime: max(duration, 0.1),
@@ -193,31 +191,54 @@ private final class RecordingEditSession: ObservableObject {
             return
         }
 
-        let midpoint = selectedCut.startTime + max(selectedCut.duration / 2, 0.5)
-        guard midpoint < selectedCut.endTime - 0.1 else { return }
+        let minimumSegmentDuration = 0.1
+        let splitTime = min(max(playheadTime, 0), max(duration, minimumSegmentDuration))
+        guard let index = cuts.firstIndex(where: { cut in
+            splitTime > cut.startTime + minimumSegmentDuration
+                && splitTime < cut.endTime - minimumSegmentDuration
+        }) else {
+            seek(to: splitTime, selectingCut: true)
+            return
+        }
 
-        var first = selectedCut
-        first.endTime = midpoint
-        var second = selectedCut
+        var first = cuts[index]
+        first.endTime = splitTime
+        var second = cuts[index]
         second.id = UUID()
-        second.startTime = midpoint
+        second.startTime = splitTime
         cuts[index] = first
         cuts.insert(second, at: index + 1)
         selectedCutID = second.id
-        seek(to: second.startTime, selectingCut: false)
+        seek(to: splitTime, selectingCut: false)
     }
 
-    func deleteSelectedCut() {
-        guard canDeleteSelectedCut,
+    func mergeSelectedCut() {
+        guard canMergeSelectedCut,
               let selectedCutID,
               let index = cuts.firstIndex(where: { $0.id == selectedCutID })
         else {
             return
         }
 
-        cuts.remove(at: index)
-        self.selectedCutID = cuts[min(index, cuts.count - 1)].id
-        seekToSelectedCutStart()
+        if index > 0 {
+            var merged = cuts[index - 1]
+            let selected = cuts[index]
+            merged.startTime = min(merged.startTime, selected.startTime)
+            merged.endTime = max(merged.endTime, selected.endTime)
+            cuts[index - 1] = merged
+            cuts.remove(at: index)
+            self.selectedCutID = merged.id
+            seek(to: max(merged.startTime, min(playheadTime, merged.endTime)), selectingCut: false)
+        } else {
+            var merged = cuts[index]
+            let next = cuts[index + 1]
+            merged.startTime = min(merged.startTime, next.startTime)
+            merged.endTime = max(merged.endTime, next.endTime)
+            cuts[index] = merged
+            cuts.remove(at: index + 1)
+            self.selectedCutID = merged.id
+            seek(to: max(merged.startTime, min(playheadTime, merged.endTime)), selectingCut: false)
+        }
     }
 
     func seekToSelectedCutStart() {
@@ -683,6 +704,28 @@ private struct RecordingEditorTimeline: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 10) {
+                ControlGroup {
+                    Button {
+                        session.addCut()
+                    } label: {
+                        Label(t("Add Cut"), systemImage: "scissors")
+                    }
+                    .labelStyle(.iconOnly)
+                    .help(t("Add Cut at Playhead"))
+                    .accessibilityLabel(t("Add Cut"))
+
+                    Button {
+                        session.mergeSelectedCut()
+                    } label: {
+                        Label(t("Merge Cut"), systemImage: "link")
+                    }
+                    .labelStyle(.iconOnly)
+                    .disabled(!session.canMergeSelectedCut)
+                    .help(t("Merge Cut"))
+                    .accessibilityLabel(t("Merge Cut"))
+                }
+                .controlSize(.small)
+
                 Label(t("Main Timeline"), systemImage: "film.stack")
                     .font(.system(size: 12, weight: .semibold))
                 Text("\(timeString(session.playheadTime)) / \(timeString(session.duration))")
@@ -691,23 +734,6 @@ private struct RecordingEditorTimeline: View {
                 Spacer()
 
                 timelineZoomControls
-
-                Button {
-                    session.addCut()
-                } label: {
-                    Label(t("Add Cut"), systemImage: "plus")
-                }
-                .controlSize(.small)
-                .help(t("Add Cut"))
-
-                Button(role: .destructive) {
-                    session.deleteSelectedCut()
-                } label: {
-                    Label(t("Delete Cut"), systemImage: "trash")
-                }
-                .controlSize(.small)
-                .disabled(!session.canDeleteSelectedCut)
-                .help(t("Delete Cut"))
             }
             .padding(.horizontal, horizontalPadding)
             .frame(height: 40)
@@ -811,11 +837,11 @@ private struct RecordingEditorTimeline: View {
             .controlSize(.small)
 
             Slider(value: timelineZoomBinding, in: Double(minimumPixelsPerSecond)...Double(maximumPixelsPerSecond)) {
-                Text(t("Timeline Zoom"))
+                Text(t("Zoom"))
             }
             .controlSize(.small)
             .frame(width: 92)
-            .help(t("Timeline Zoom"))
+            .help(t("Zoom"))
         }
     }
 
@@ -1266,6 +1292,7 @@ private struct RecordingEditorPreviewCanvas: View {
     @ObservedObject var session: RecordingEditSession
     @State private var dragStartFrame: RecordingEditNormalizedRect?
     @State private var resizeStartFrame: RecordingEditNormalizedRect?
+    @State private var isCameraFrameSelected = false
 
     private func t(_ english: String) -> String {
         interfaceLanguage.text(english)
@@ -1278,15 +1305,6 @@ private struct RecordingEditorPreviewCanvas: View {
         case bottomRight
 
         var id: Self { self }
-
-        var alignment: Alignment {
-            switch self {
-            case .topLeft: return .topLeading
-            case .topRight: return .topTrailing
-            case .bottomLeft: return .bottomLeading
-            case .bottomRight: return .bottomTrailing
-            }
-        }
     }
 
     var body: some View {
@@ -1296,6 +1314,9 @@ private struct RecordingEditorPreviewCanvas: View {
             ZStack {
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
                     .fill(Color.black)
+                    .onTapGesture {
+                        isCameraFrameSelected = false
+                    }
 
                 if let cut = session.selectedCut {
                     ZStack {
@@ -1310,6 +1331,10 @@ private struct RecordingEditorPreviewCanvas: View {
                             RecordingPlayerLayerView(player: session.screenPlayer, gravity: .resizeAspect)
                         case .screenWithCamera:
                             RecordingPlayerLayerView(player: session.screenPlayer, gravity: .resizeAspect)
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    isCameraFrameSelected = false
+                                }
                             if session.hasCamera {
                                 draggableCameraOverlay(cut: cut, canvasSize: fittedSize)
                             }
@@ -1327,6 +1352,9 @@ private struct RecordingEditorPreviewCanvas: View {
             .position(x: geometry.size.width / 2, y: geometry.size.height / 2)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .onChange(of: session.selectedCutID) { _, _ in
+            isCameraFrameSelected = false
+        }
     }
 
     private var unavailableCameraView: some View {
@@ -1352,14 +1380,19 @@ private struct RecordingEditorPreviewCanvas: View {
                 .contentShape(Rectangle())
                 .gesture(cameraMoveGesture(startingFrom: frame, canvasSize: canvasSize))
 
-            ForEach(CameraResizeCorner.allCases) { corner in
-                cameraResizeHandle
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: corner.alignment)
-                    .gesture(cameraResizeGesture(startingFrom: frame, canvasSize: canvasSize, corner: corner))
+            if isCameraFrameSelected {
+                ForEach(CameraResizeCorner.allCases) { corner in
+                    cameraResizeHandle
+                        .position(cameraResizeHandlePosition(corner: corner, width: width, height: height))
+                        .gesture(cameraResizeGesture(startingFrom: frame, canvasSize: canvasSize, corner: corner))
+                }
             }
         }
         .frame(width: width, height: height)
         .position(x: x, y: y)
+        .onTapGesture {
+            isCameraFrameSelected = true
+        }
         .accessibilityLabel(t("Camera Frame"))
     }
 
@@ -1377,6 +1410,23 @@ private struct RecordingEditorPreviewCanvas: View {
             .help(t("Resize Camera Frame"))
     }
 
+    private func cameraResizeHandlePosition(
+        corner: CameraResizeCorner,
+        width: CGFloat,
+        height: CGFloat
+    ) -> CGPoint {
+        switch corner {
+        case .topLeft:
+            return CGPoint(x: 0, y: 0)
+        case .topRight:
+            return CGPoint(x: width, y: 0)
+        case .bottomLeft:
+            return CGPoint(x: 0, y: height)
+        case .bottomRight:
+            return CGPoint(x: width, y: height)
+        }
+    }
+
     private func cameraMoveGesture(
         startingFrom frame: RecordingEditNormalizedRect,
         canvasSize: CGSize
@@ -1385,6 +1435,7 @@ private struct RecordingEditorPreviewCanvas: View {
             .onChanged { value in
                 if dragStartFrame == nil {
                     dragStartFrame = frame
+                    isCameraFrameSelected = true
                 }
                 guard var next = dragStartFrame else { return }
                 next.x += Double(value.translation.width / max(canvasSize.width, 1))
@@ -1408,6 +1459,7 @@ private struct RecordingEditorPreviewCanvas: View {
             .onChanged { value in
                 if resizeStartFrame == nil {
                     resizeStartFrame = frame
+                    isCameraFrameSelected = true
                 }
                 guard let base = resizeStartFrame else { return }
 
