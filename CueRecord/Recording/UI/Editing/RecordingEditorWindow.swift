@@ -1466,7 +1466,7 @@ private final class RecordingTimelineWheelZoomHostView: NSView {
         removeEventMonitor()
         guard window != nil else { return }
 
-        eventMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
+        eventMonitor = NSEvent.addLocalMonitorForEvents(matching: [.scrollWheel, .magnify]) { [weak self] event in
             guard let self,
                   let window = self.window,
                   event.window === window
@@ -1477,6 +1477,16 @@ private final class RecordingTimelineWheelZoomHostView: NSView {
             let location = self.convert(event.locationInWindow, from: nil)
             guard self.bounds.contains(location) else {
                 return event
+            }
+
+            if event.type == .magnify {
+                let magnificationDelta = event.magnification * 280
+                guard magnificationDelta != 0 else {
+                    return event
+                }
+
+                self.onScroll?(magnificationDelta)
+                return nil
             }
 
             let dominantDelta = abs(event.scrollingDeltaY) >= abs(event.scrollingDeltaX)
