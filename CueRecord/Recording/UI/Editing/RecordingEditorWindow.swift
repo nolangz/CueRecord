@@ -794,8 +794,8 @@ private struct RecordingEditorTimeline: View {
                             .strokeBorder(Color.secondary.opacity(0.12), lineWidth: 1)
                     }
                     .background {
-                        RecordingTimelineWheelZoomView { delta in
-                            zoomFromScroll(delta)
+                        RecordingTimelineMagnifyView { magnification in
+                            zoomFromMagnification(magnification)
                         }
                     }
                     .padding(.horizontal, horizontalPadding)
@@ -879,8 +879,8 @@ private struct RecordingEditorTimeline: View {
         pixelsPerSecond = clampedPixelsPerSecond(pixelsPerSecond / 1.24)
     }
 
-    private func zoomFromScroll(_ delta: CGFloat) {
-        let factor = exp(delta * 0.0032)
+    private func zoomFromMagnification(_ magnification: CGFloat) {
+        let factor = exp(magnification * 0.9)
         pixelsPerSecond = clampedPixelsPerSecond(pixelsPerSecond * factor)
     }
 
@@ -1306,17 +1306,17 @@ private struct RecordingTimelineCutSegment: View {
     }
 }
 
-private struct RecordingTimelineWheelZoomView: NSViewRepresentable {
-    let onScroll: (CGFloat) -> Void
+private struct RecordingTimelineMagnifyView: NSViewRepresentable {
+    let onMagnify: (CGFloat) -> Void
 
-    func makeNSView(context: Context) -> RecordingTimelineWheelZoomHostView {
-        let view = RecordingTimelineWheelZoomHostView()
-        view.onScroll = onScroll
+    func makeNSView(context: Context) -> RecordingTimelineMagnifyHostView {
+        let view = RecordingTimelineMagnifyHostView()
+        view.onMagnify = onMagnify
         return view
     }
 
-    func updateNSView(_ nsView: RecordingTimelineWheelZoomHostView, context: Context) {
-        nsView.onScroll = onScroll
+    func updateNSView(_ nsView: RecordingTimelineMagnifyHostView, context: Context) {
+        nsView.onMagnify = onMagnify
     }
 }
 
@@ -1450,8 +1450,8 @@ private final class RecordingTimelineScrubTrackingHostView: NSView {
     }
 }
 
-private final class RecordingTimelineWheelZoomHostView: NSView {
-    var onScroll: ((CGFloat) -> Void)?
+private final class RecordingTimelineMagnifyHostView: NSView {
+    var onMagnify: ((CGFloat) -> Void)?
     private var eventMonitor: Any?
 
     override func viewDidMoveToWindow() {
@@ -1467,7 +1467,7 @@ private final class RecordingTimelineWheelZoomHostView: NSView {
         removeEventMonitor()
         guard window != nil else { return }
 
-        eventMonitor = NSEvent.addLocalMonitorForEvents(matching: [.scrollWheel, .magnify]) { [weak self] event in
+        eventMonitor = NSEvent.addLocalMonitorForEvents(matching: [.magnify]) { [weak self] event in
             guard let self,
                   let window = self.window,
                   event.window === window
@@ -1480,24 +1480,11 @@ private final class RecordingTimelineWheelZoomHostView: NSView {
                 return event
             }
 
-            if event.type == .magnify {
-                let magnificationDelta = event.magnification * 280
-                guard magnificationDelta != 0 else {
-                    return event
-                }
-
-                self.onScroll?(magnificationDelta)
-                return nil
-            }
-
-            let dominantDelta = abs(event.scrollingDeltaY) >= abs(event.scrollingDeltaX)
-                ? event.scrollingDeltaY
-                : event.scrollingDeltaX
-            guard dominantDelta != 0 else {
+            guard event.magnification != 0 else {
                 return event
             }
 
-            self.onScroll?(dominantDelta)
+            self.onMagnify?(event.magnification)
             return nil
         }
     }
