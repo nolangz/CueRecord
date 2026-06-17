@@ -271,15 +271,19 @@ struct DeepSeekChatClient {
         - Preserve markdown headings and list markers.
         - Do not add new claims, examples, titles, summaries, or explanations.
         - Do not delete meaningful content.
+        - Do not include delimiter lines such as "---".
 
-        Source markdown:
-        ---
+        Source markdown begins on the next line. Do not include this label in the output.
         \(request.sourceMarkdown)
-        ---
         """
     }
 
     private func sanitizeMarkdownResponse(_ content: String) -> String {
+        let unfenced = removeWrappingCodeFence(from: content)
+        return removeWrappingDelimiterRules(from: unfenced)
+    }
+
+    private func removeWrappingCodeFence(from content: String) -> String {
         let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.hasPrefix("```") else { return trimmed }
 
@@ -294,6 +298,24 @@ struct DeepSeekChatClient {
         lines.removeFirst()
         lines.removeLast()
         return lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func removeWrappingDelimiterRules(from content: String) -> String {
+        var lines = content.trimmingCharacters(in: .whitespacesAndNewlines).components(separatedBy: .newlines)
+
+        while let first = lines.first, isPromptDelimiterLine(first) {
+            lines.removeFirst()
+        }
+
+        while let last = lines.last, isPromptDelimiterLine(last) {
+            lines.removeLast()
+        }
+
+        return lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func isPromptDelimiterLine(_ line: String) -> Bool {
+        line.trimmingCharacters(in: .whitespaces) == "---"
     }
 
     private func responseSnippet(from data: Data) -> String {

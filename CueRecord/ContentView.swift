@@ -8,6 +8,63 @@ import SwiftUI
 import UniformTypeIdentifiers
 import CoreImage.CIFilterBuiltins
 
+private enum AIScriptGenerationStatus {
+    case idle
+    case processing
+    case completed
+
+    var title: String {
+        switch self {
+        case .idle:
+            return "AI Breath Cuts"
+        case .processing:
+            return "Processing"
+        case .completed:
+            return "Completed"
+        }
+    }
+
+    var symbolName: String {
+        switch self {
+        case .idle, .processing:
+            return "sparkles"
+        case .completed:
+            return "checkmark"
+        }
+    }
+
+    var backgroundColor: Color {
+        switch self {
+        case .idle:
+            return Color(nsColor: .controlBackgroundColor)
+        case .processing:
+            return .purple
+        case .completed:
+            return .green
+        }
+    }
+
+    var foregroundColor: Color {
+        switch self {
+        case .idle:
+            return .primary
+        case .processing, .completed:
+            return .white
+        }
+    }
+
+    var borderColor: Color {
+        switch self {
+        case .idle:
+            return Color(nsColor: .separatorColor).opacity(0.55)
+        case .processing:
+            return .purple.opacity(0.75)
+        case .completed:
+            return .green.opacity(0.75)
+        }
+    }
+}
+
 struct ContentView: View {
     @ObservedObject private var service = CueRecordService.shared
     @ObservedObject private var recordingController = RecordingController.shared
@@ -24,8 +81,9 @@ struct ContentView: View {
     @State private var settingsInitialTab: SettingsTab = .appearance
     @State private var showAbout = false
     @State private var showAIScriptComposer = false
-    @State private var isAIScriptProcessing = false
+    @State private var aiScriptStatus: AIScriptGenerationStatus = .idle
     @State private var aiScriptTask: Task<Void, Never>?
+    @State private var aiScriptCompletionResetTask: Task<Void, Never>?
     @State private var setupCompleted = AppSetupPreferences.initialSetupCompleted
     @State private var recordingPreviewBarWindow = RecordingPreviewBarWindow()
     @State private var hidesMainUIForRecordingPreview = false
@@ -56,6 +114,10 @@ struct ContentView: View {
 
     private var currentPageHasContent: Bool {
         !service.currentPageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var isAIScriptProcessing: Bool {
+        aiScriptStatus == .processing
     }
 
     private var shouldShowVaultPicker: Bool {
@@ -212,7 +274,7 @@ struct ContentView: View {
     private func startAIScriptGeneration(_ submission: AIBreathCutSubmission) {
         guard !isAIScriptProcessing else { return }
 
-        isAIScriptProcessing = true
+        setAIScriptStatus(.processing)
         aiScriptTask?.cancel()
         aiScriptTask = Task {
             do {
@@ -223,27 +285,47 @@ struct ContentView: View {
 
                 await MainActor.run {
                     _ = service.addPage(text: generatedMarkdown, title: submission.generatedTitle)
-                    isAIScriptProcessing = false
+                    setAIScriptStatus(.completed)
                     aiScriptTask = nil
                 }
             } catch is CancellationError {
                 await MainActor.run {
-                    isAIScriptProcessing = false
+                    setAIScriptStatus(.idle)
                     aiScriptTask = nil
                 }
             } catch {
                 await MainActor.run {
                     dropAlertTitle = "AI Breath Cuts Failed"
                     dropError = error.localizedDescription
-                    isAIScriptProcessing = false
+                    setAIScriptStatus(.idle)
                     aiScriptTask = nil
                 }
             }
         }
     }
 
+    private func setAIScriptStatus(_ status: AIScriptGenerationStatus) {
+        aiScriptCompletionResetTask?.cancel()
+        aiScriptCompletionResetTask = nil
+        aiScriptStatus = status
+
+        guard status == .completed else { return }
+
+        aiScriptCompletionResetTask = Task {
+            try? await Task.sleep(nanoseconds: 2_400_000_000)
+            guard !Task.isCancelled else { return }
+
+            await MainActor.run {
+                guard aiScriptStatus == .completed else { return }
+                aiScriptStatus = .idle
+                aiScriptCompletionResetTask = nil
+            }
+        }
+    }
+
     private var pageTitleHeader: some View {
         let index = service.currentPageIndex
+        let isAIButtonDisabled = isAIScriptProcessing || !currentPageHasContent || isRunning || isDictating || recordingController.isRecording || recordingController.isPreviewing
 
         return HStack(alignment: .top, spacing: 12) {
             if editingPageTitleIndex == index {
@@ -275,22 +357,32 @@ struct ContentView: View {
             Button {
                 showAIScriptComposer = true
             } label: {
-                if isAIScriptProcessing {
-                    HStack(spacing: 7) {
+                HStack(spacing: 7) {
+                    if isAIScriptProcessing {
                         ProgressView()
                             .controlSize(.small)
-                        Text("Processing")
+                            .tint(aiScriptStatus.foregroundColor)
+                    } else {
+                        Image(systemName: aiScriptStatus.symbolName)
                     }
-                    .font(.system(size: 12, weight: .semibold))
-                } else {
-                    Label("AI Breath Cuts", systemImage: "sparkles")
-                        .font(.system(size: 12, weight: .semibold))
+                    Text(aiScriptStatus.title)
                 }
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(aiScriptStatus.foregroundColor)
+                .lineLimit(1)
+                .padding(.horizontal, 11)
+                .frame(minWidth: 128, minHeight: 26)
+                .background(aiScriptStatus.backgroundColor, in: Capsule())
+                .overlay(
+                    Capsule()
+                        .stroke(aiScriptStatus.borderColor, lineWidth: 1)
+                )
+                .contentShape(Capsule())
             }
-            .buttonStyle(.bordered)
+            .buttonStyle(.plain)
             .controlSize(.small)
-            .frame(minWidth: 128)
-            .disabled(isAIScriptProcessing || !currentPageHasContent || isRunning || isDictating || recordingController.isRecording || recordingController.isPreviewing)
+            .opacity(isAIButtonDisabled && !isAIScriptProcessing ? 0.45 : 1)
+            .disabled(isAIButtonDisabled)
             .help(isAIScriptProcessing ? "AI Breath Cuts is processing" : "Add natural teleprompter line breaks")
         }
         .frame(maxWidth: .infinity, alignment: .leading)
