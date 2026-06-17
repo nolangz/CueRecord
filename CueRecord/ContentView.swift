@@ -676,12 +676,16 @@ struct ContentView: View {
             } else if shouldShowVaultPicker {
                 vaultPicker
             } else {
-                NavigationSplitView {
-                    pageSidebar
-                        .navigationSplitViewColumnWidth(min: 210, ideal: 220, max: 260)
-                } detail: {
-                    mainContent
-                        .ignoresSafeArea(.container, edges: .top)
+                GeometryReader { geometry in
+                    let sidebarMaxWidth = max(260, geometry.size.width * 0.5)
+
+                    NavigationSplitView {
+                        pageSidebar
+                            .navigationSplitViewColumnWidth(min: 210, ideal: 220, max: sidebarMaxWidth)
+                    } detail: {
+                        mainContent
+                            .ignoresSafeArea(.container, edges: .top)
+                    }
                 }
             }
         }
