@@ -765,6 +765,19 @@ private struct RecordingEditorTimeline: View {
                                         .offset(x: playheadX - 12, y: 0)
                                 }
                                 .frame(width: contentWidth, height: rulerHeight + trackHeight, alignment: .topLeading)
+                                .background {
+                                    RecordingTimelineScrubTrackingView(
+                                        cuts: session.cuts,
+                                        duration: duration,
+                                        contentWidth: contentWidth,
+                                        rulerHeight: rulerHeight,
+                                        trackHeight: trackHeight
+                                    ) { seconds in
+                                        isPlayheadSelected = true
+                                        session.pause()
+                                        session.seek(to: seconds, selectingCut: true)
+                                    }
+                                }
                             }
                             .onChange(of: pixelsPerSecond) { _, _ in
                                 withAnimation(.easeOut(duration: 0.16)) {
@@ -1303,6 +1316,136 @@ private struct RecordingTimelineWheelZoomView: NSViewRepresentable {
 
     func updateNSView(_ nsView: RecordingTimelineWheelZoomHostView, context: Context) {
         nsView.onScroll = onScroll
+    }
+}
+
+private struct RecordingTimelineScrubTrackingView: NSViewRepresentable {
+    let cuts: [RecordingEditCut]
+    let duration: Double
+    let contentWidth: CGFloat
+    let rulerHeight: CGFloat
+    let trackHeight: CGFloat
+    let onScrub: (Double) -> Void
+
+    func makeNSView(context: Context) -> RecordingTimelineScrubTrackingHostView {
+        let view = RecordingTimelineScrubTrackingHostView()
+        updateNSView(view, context: context)
+        return view
+    }
+
+    func updateNSView(_ nsView: RecordingTimelineScrubTrackingHostView, context: Context) {
+        nsView.cuts = cuts
+        nsView.duration = duration
+        nsView.contentWidth = contentWidth
+        nsView.rulerHeight = rulerHeight
+        nsView.trackHeight = trackHeight
+        nsView.onScrub = onScrub
+    }
+}
+
+private final class RecordingTimelineScrubTrackingHostView: NSView {
+    var cuts: [RecordingEditCut] = []
+    var duration: Double = 0.1
+    var contentWidth: CGFloat = 1
+    var rulerHeight: CGFloat = 0
+    var trackHeight: CGFloat = 0
+    var onScrub: ((Double) -> Void)?
+
+    private var eventMonitor: Any?
+    private var isScrubbing = false
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        resetEventMonitor()
+    }
+
+    deinit {
+        removeEventMonitor()
+    }
+
+    private func resetEventMonitor() {
+        removeEventMonitor()
+        guard window != nil else { return }
+
+        eventMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .leftMouseDragged, .leftMouseUp]) { [weak self] event in
+            guard let self,
+                  let window = self.window,
+                  event.window === window
+            else {
+                return event
+            }
+
+            let location = self.convert(event.locationInWindow, from: nil)
+
+            switch event.type {
+            case .leftMouseDown:
+                guard self.bounds.contains(location),
+                      self.shouldBeginScrub(at: location)
+                else {
+                    return event
+                }
+                self.isScrubbing = true
+                self.scrub(at: location)
+                return nil
+
+            case .leftMouseDragged:
+                guard self.isScrubbing else { return event }
+                self.scrub(at: location)
+                return nil
+
+            case .leftMouseUp:
+                guard self.isScrubbing else { return event }
+                self.scrub(at: location)
+                self.isScrubbing = false
+                return nil
+
+            default:
+                return event
+            }
+        }
+    }
+
+    private func removeEventMonitor() {
+        if let eventMonitor {
+            NSEvent.removeMonitor(eventMonitor)
+            self.eventMonitor = nil
+        }
+        isScrubbing = false
+    }
+
+    private func shouldBeginScrub(at location: CGPoint) -> Bool {
+        let yFromTop = bounds.height - location.y
+        guard yFromTop >= 0, yFromTop <= rulerHeight + trackHeight else {
+            return false
+        }
+
+        if yFromTop < rulerHeight {
+            return true
+        }
+
+        let clipTop = rulerHeight + 17
+        let clipBottom = clipTop + 48
+        guard yFromTop >= clipTop, yFromTop <= clipBottom else {
+            return true
+        }
+
+        let safeDuration = max(duration, 0.1)
+        for cut in cuts {
+            let clipX = contentWidth * CGFloat(cut.startTime / safeDuration)
+            let clipWidth = max(28, contentWidth * CGFloat(cut.duration / safeDuration))
+            if location.x >= clipX, location.x <= clipX + clipWidth {
+                return false
+            }
+        }
+
+        return true
+    }
+
+    private func scrub(at location: CGPoint) {
+        let safeWidth = max(contentWidth, 1)
+        let clampedX = min(max(location.x, 0), safeWidth)
+        let seconds = Double(clampedX / safeWidth) * max(duration, 0.1)
+        onScrub?(seconds)
     }
 }
 
