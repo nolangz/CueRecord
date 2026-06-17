@@ -90,10 +90,12 @@ private final class RecordingEditSession: ObservableObject {
     let duration: Double
     let videoSize: CGSize
     let hasCamera: Bool
+    private var timeObserverToken: Any?
 
     @Published var cuts: [RecordingEditCut]
     @Published var selectedCutID: UUID?
     @Published private(set) var isPlaying = false
+    @Published private(set) var playheadTime: Double = 0
 
     init(capturedOutput: CapturedRecordingOutput) {
         self.capturedOutput = capturedOutput
@@ -122,6 +124,22 @@ private final class RecordingEditSession: ObservableObject {
         )
         cuts = [cut]
         selectedCutID = cut.id
+        playheadTime = cut.startTime
+
+        timeObserverToken = screenPlayer.addPeriodicTimeObserver(
+            forInterval: CMTime(seconds: 0.05, preferredTimescale: 600),
+            queue: .main
+        ) { [weak self] time in
+            Task { @MainActor [weak self] in
+                self?.updatePlayhead(from: time)
+            }
+        }
+    }
+
+    deinit {
+        if let timeObserverToken {
+            screenPlayer.removeTimeObserver(timeObserverToken)
+        }
     }
 
     var selectedCut: RecordingEditCut? {
@@ -150,6 +168,14 @@ private final class RecordingEditSession: ObservableObject {
         cuts[index] = cut
     }
 
+    func updateCut(id: RecordingEditCut.ID, _ update: (inout RecordingEditCut) -> Void) {
+        guard let index = cuts.firstIndex(where: { $0.id == id }) else { return }
+        var cut = cuts[index]
+        update(&cut)
+        normalize(&cut)
+        cuts[index] = cut
+    }
+
     func addCut() {
         guard let selectedCut,
               let index = cuts.firstIndex(where: { $0.id == selectedCut.id })
@@ -163,6 +189,7 @@ private final class RecordingEditSession: ObservableObject {
             )
             cuts.append(cut)
             selectedCutID = cut.id
+            seek(to: cut.startTime, selectingCut: true)
             return
         }
 
@@ -177,6 +204,7 @@ private final class RecordingEditSession: ObservableObject {
         cuts[index] = first
         cuts.insert(second, at: index + 1)
         selectedCutID = second.id
+        seek(to: second.startTime, selectingCut: false)
     }
 
     func deleteSelectedCut() {
@@ -189,13 +217,32 @@ private final class RecordingEditSession: ObservableObject {
 
         cuts.remove(at: index)
         self.selectedCutID = cuts[min(index, cuts.count - 1)].id
+        seekToSelectedCutStart()
     }
 
     func seekToSelectedCutStart() {
         let seconds = selectedCut?.startTime ?? 0
-        let time = CMTime(seconds: seconds, preferredTimescale: 600)
+        seek(to: seconds, selectingCut: false)
+    }
+
+    func selectCut(_ id: RecordingEditCut.ID, seek: Bool) {
+        selectedCutID = id
+        if seek, let cut = cuts.first(where: { $0.id == id }) {
+            self.seek(to: cut.startTime, selectingCut: false)
+        }
+    }
+
+    func seek(to seconds: Double, selectingCut: Bool) {
+        let clampedSeconds = min(max(0, seconds), max(duration, 0.1))
+        let time = CMTime(seconds: clampedSeconds, preferredTimescale: 600)
         screenPlayer.seek(to: time, toleranceBefore: .zero, toleranceAfter: .zero)
         cameraPlayer?.seek(to: time, toleranceBefore: .zero, toleranceAfter: .zero)
+        playheadTime = clampedSeconds
+
+        if selectingCut,
+           let cut = cuts.first(where: { clampedSeconds >= $0.startTime && clampedSeconds <= $0.endTime }) {
+            selectedCutID = cut.id
+        }
     }
 
     func play() {
@@ -213,6 +260,19 @@ private final class RecordingEditSession: ObservableObject {
 
     func togglePlayback() {
         isPlaying ? pause() : play()
+    }
+
+    private func updatePlayhead(from time: CMTime) {
+        let seconds = CMTimeGetSeconds(time)
+        guard seconds.isFinite else { return }
+
+        playheadTime = min(max(0, seconds), max(duration, 0.1))
+        guard let selectedCut else { return }
+
+        if playheadTime >= selectedCut.endTime {
+            pause()
+            seek(to: selectedCut.endTime, selectingCut: false)
+        }
     }
 
     private func seekIfNeededForSelectedCut() {
@@ -370,15 +430,18 @@ private struct RecordingEditorView: View {
     var body: some View {
         VStack(spacing: 0) {
             HSplitView {
-                cutsSidebar
-                    .frame(minWidth: 190, idealWidth: 220, maxWidth: 280, maxHeight: .infinity)
-
                 previewPane
-                    .frame(minWidth: 500, maxWidth: .infinity, maxHeight: .infinity)
+                    .frame(minWidth: 620, maxWidth: .infinity, maxHeight: .infinity)
 
                 inspector
                     .frame(minWidth: 280, idealWidth: 312, maxWidth: 360, maxHeight: .infinity)
             }
+            .frame(maxHeight: .infinity)
+
+            Divider()
+
+            RecordingEditorTimeline(session: session)
+                .frame(height: 176)
 
             Divider()
 
@@ -389,47 +452,6 @@ private struct RecordingEditorView: View {
         .onDisappear {
             session.pause()
         }
-    }
-
-    private var cutsSidebar: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Text(t("Cuts"))
-                    .font(.headline)
-                Spacer()
-                Button {
-                    session.addCut()
-                } label: {
-                    Image(systemName: "plus")
-                        .frame(width: 28, height: 28)
-                }
-                .buttonStyle(.borderless)
-                .help(t("Add Cut"))
-                .accessibilityLabel(t("Add Cut"))
-            }
-            .padding(.horizontal, 14)
-            .padding(.top, 18)
-            .padding(.bottom, 8)
-
-            List(selection: $session.selectedCutID) {
-                ForEach(Array(session.cuts.enumerated()), id: \.element.id) { index, cut in
-                    RecordingCutRow(index: index, cut: cut)
-                        .tag(cut.id)
-                }
-            }
-            .listStyle(.sidebar)
-
-            Button(role: .destructive) {
-                session.deleteSelectedCut()
-            } label: {
-                Label(t("Delete Cut"), systemImage: "trash")
-                    .frame(maxWidth: .infinity)
-            }
-            .disabled(!session.canDeleteSelectedCut)
-            .padding(12)
-            .accessibilityLabel(t("Delete Cut"))
-        }
-        .background(.bar)
     }
 
     private var previewPane: some View {
@@ -672,32 +694,327 @@ private struct RecordingEditorView: View {
     }
 }
 
-private struct RecordingCutRow: View {
+private struct RecordingEditorTimeline: View {
     @ObservedObject private var interfaceLanguage = InterfaceLanguageSettings.shared
-    let index: Int
-    let cut: RecordingEditCut
+    @ObservedObject var session: RecordingEditSession
+
+    private let gutterWidth: CGFloat = 72
+    private let horizontalPadding: CGFloat = 16
+    private let rulerHeight: CGFloat = 34
+    private let trackHeight: CGFloat = 58
 
     private func t(_ english: String) -> String {
         interfaceLanguage.text(english)
     }
 
     var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: cut.layoutMode.systemImage)
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(.secondary)
-                .frame(width: 20)
-
-            VStack(alignment: .leading, spacing: 3) {
-                Text("\(t("Cut")) \(index + 1)")
+        VStack(spacing: 10) {
+            HStack(spacing: 10) {
+                Label(t("Timeline"), systemImage: "film.stack")
                     .font(.system(size: 13, weight: .semibold))
-                Text("\(timeString(cut.startTime)) - \(timeString(cut.endTime)) · \(t(cut.layoutMode.shortLabel))")
-                    .font(.caption)
+                Text("\(timeString(session.playheadTime)) / \(timeString(session.duration))")
+                    .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                Spacer()
+                Button {
+                    session.addCut()
+                } label: {
+                    Label(t("Add Cut"), systemImage: "plus")
+                }
+                .controlSize(.small)
+                .help(t("Add Cut"))
+
+                Button(role: .destructive) {
+                    session.deleteSelectedCut()
+                } label: {
+                    Label(t("Delete Cut"), systemImage: "trash")
+                }
+                .controlSize(.small)
+                .disabled(!session.canDeleteSelectedCut)
+                .help(t("Delete Cut"))
+            }
+            .padding(.horizontal, horizontalPadding)
+
+            GeometryReader { geometry in
+                let contentWidth = max(geometry.size.width - gutterWidth - horizontalPadding * 2, 1)
+                let duration = max(session.duration, 0.1)
+                let playheadX = gutterWidth + horizontalPadding + contentWidth * CGFloat(session.playheadTime / duration)
+
+                ZStack(alignment: .topLeading) {
+                    HStack(spacing: 10) {
+                        trackGutter
+                            .frame(width: gutterWidth, height: rulerHeight + trackHeight)
+
+                        ZStack(alignment: .topLeading) {
+                            timelineRuler(width: contentWidth, duration: duration)
+                                .frame(width: contentWidth, height: rulerHeight)
+
+                            timelineTrack(width: contentWidth, duration: duration)
+                                .frame(width: contentWidth, height: trackHeight)
+                                .offset(y: rulerHeight)
+                        }
+                    }
+                    .padding(.horizontal, horizontalPadding)
+
+                    playhead
+                        .offset(x: playheadX, y: 6)
+                }
             }
         }
-        .padding(.vertical, 4)
+        .padding(.top, 12)
+        .padding(.bottom, 14)
+        .background(.bar)
+    }
+
+    private var trackGutter: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Spacer()
+                .frame(height: rulerHeight - 3)
+            HStack(spacing: 7) {
+                Image(systemName: "film")
+                    .font(.system(size: 13, weight: .semibold))
+                    .frame(width: 22, height: 22)
+                    .background(Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(t("Clip"))
+                        .font(.system(size: 11, weight: .semibold))
+                    Text("\(session.cuts.count)")
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .frame(height: trackHeight)
+        }
+    }
+
+    private func timelineRuler(width: CGFloat, duration: Double) -> some View {
+        ZStack(alignment: .bottomLeading) {
+            ForEach(rulerTicks(for: duration), id: \.self) { tick in
+                let x = width * CGFloat(tick / duration)
+                VStack(spacing: 4) {
+                    Text(timeString(tick))
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .fixedSize()
+                    Rectangle()
+                        .fill(Color.secondary.opacity(0.34))
+                        .frame(width: 1, height: 7)
+                }
+                .offset(x: x)
+            }
+
+            Rectangle()
+                .fill(Color.secondary.opacity(0.20))
+                .frame(height: 1)
+        }
+    }
+
+    private func timelineTrack(width: CGFloat, duration: Double) -> some View {
+        ZStack(alignment: .leading) {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.primary.opacity(0.055))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .strokeBorder(Color.primary.opacity(0.08))
+                }
+                .contentShape(Rectangle())
+                .gesture(
+                    DragGesture(minimumDistance: 0)
+                        .onEnded { value in
+                            let fraction = min(max(value.location.x / max(width, 1), 0), 1)
+                            session.seek(to: Double(fraction) * duration, selectingCut: true)
+                        }
+                )
+
+            ForEach(Array(session.cuts.enumerated()), id: \.element.id) { index, cut in
+                let x = width * CGFloat(cut.startTime / duration)
+                let segmentWidth = max(28, width * CGFloat(cut.duration / duration))
+
+                RecordingTimelineCutSegment(
+                    index: index,
+                    cut: cut,
+                    isSelected: session.selectedCutID == cut.id,
+                    width: segmentWidth,
+                    duration: duration,
+                    trackWidth: width,
+                    onSelect: {
+                        session.selectCut(cut.id, seek: true)
+                    },
+                    onTrimStart: { nextStart in
+                        session.updateCut(id: cut.id) { selected in
+                            selected.startTime = nextStart
+                        }
+                    },
+                    onTrimEnd: { nextEnd in
+                        session.updateCut(id: cut.id) { selected in
+                            selected.endTime = nextEnd
+                        }
+                    }
+                )
+                .offset(x: x)
+            }
+        }
+    }
+
+    private var playhead: some View {
+        VStack(spacing: 0) {
+            Circle()
+                .fill(Color.red)
+                .frame(width: 11, height: 11)
+                .shadow(color: .black.opacity(0.20), radius: 3, y: 1)
+            Rectangle()
+                .fill(
+                    LinearGradient(
+                        colors: [Color.red, Color.red.opacity(0.26), Color.red.opacity(0.0)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+                .frame(width: 2, height: rulerHeight + trackHeight - 3)
+        }
+        .offset(x: -5.5)
+        .allowsHitTesting(false)
+        .accessibilityLabel(t("Playhead"))
+    }
+
+    private func rulerTicks(for duration: Double) -> [Double] {
+        let tickCount = min(max(Int(duration / 8), 3), 7)
+        guard tickCount > 1 else { return [0, duration] }
+        return (0...tickCount).map { index in
+            duration * Double(index) / Double(tickCount)
+        }
+    }
+
+    private func timeString(_ seconds: Double) -> String {
+        let safeSeconds = max(0, seconds)
+        let minutes = Int(safeSeconds) / 60
+        let wholeSeconds = Int(safeSeconds) % 60
+        return String(format: "%02d:%02d", minutes, wholeSeconds)
+    }
+}
+
+private struct RecordingTimelineCutSegment: View {
+    @ObservedObject private var interfaceLanguage = InterfaceLanguageSettings.shared
+    let index: Int
+    let cut: RecordingEditCut
+    let isSelected: Bool
+    let width: CGFloat
+    let duration: Double
+    let trackWidth: CGFloat
+    let onSelect: () -> Void
+    let onTrimStart: (Double) -> Void
+    let onTrimEnd: (Double) -> Void
+
+    @State private var trimBase: (start: Double, end: Double)?
+
+    private func t(_ english: String) -> String {
+        interfaceLanguage.text(english)
+    }
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(segmentGradient)
+                .overlay {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .strokeBorder(isSelected ? Color.white.opacity(0.92) : Color.white.opacity(0.20), lineWidth: isSelected ? 1.5 : 1)
+                }
+                .shadow(color: .black.opacity(isSelected ? 0.24 : 0.12), radius: isSelected ? 8 : 4, y: 3)
+
+            HStack(spacing: 8) {
+                if width > 64 {
+                    Image(systemName: cut.layoutMode.systemImage)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.86))
+                }
+
+                if width > 112 {
+                    VStack(spacing: 1) {
+                        Text("\(t("Cut")) \(index + 1)")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .lineLimit(1)
+                        Text("\(t(cut.layoutMode.shortLabel)) · \(timeString(cut.duration))")
+                            .font(.caption2.monospacedDigit())
+                            .foregroundStyle(.white.opacity(0.72))
+                            .lineLimit(1)
+                    }
+                }
+            }
+            .padding(.horizontal, 16)
+
+            trimHandle(.start)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            trimHandle(.end)
+                .frame(maxWidth: .infinity, alignment: .trailing)
+        }
+        .frame(width: width, height: 50)
+        .contentShape(Rectangle())
+        .onTapGesture(perform: onSelect)
+        .accessibilityLabel("\(t("Cut")) \(index + 1), \(t(cut.layoutMode.shortLabel))")
+    }
+
+    private var segmentGradient: LinearGradient {
+        switch cut.layoutMode {
+        case .cameraFullScreen:
+            return LinearGradient(
+                colors: [Color.pink.opacity(0.82), Color.purple.opacity(0.78)],
+                startPoint: .leading,
+                endPoint: .trailing
+            )
+        case .screenFullScreen:
+            return LinearGradient(
+                colors: [Color.accentColor.opacity(0.86), Color.blue.opacity(0.70)],
+                startPoint: .leading,
+                endPoint: .trailing
+            )
+        case .screenWithCamera:
+            return LinearGradient(
+                colors: [Color.teal.opacity(0.82), Color.accentColor.opacity(0.78)],
+                startPoint: .leading,
+                endPoint: .trailing
+            )
+        }
+    }
+
+    private enum TrimEdge {
+        case start
+        case end
+    }
+
+    private func trimHandle(_ edge: TrimEdge) -> some View {
+        Rectangle()
+            .fill(Color.clear)
+            .frame(width: 24, height: 50)
+            .overlay {
+                Capsule()
+                    .fill(Color.white.opacity(isSelected ? 0.82 : 0.46))
+                    .frame(width: 3, height: 30)
+            }
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { value in
+                        if trimBase == nil {
+                            trimBase = (cut.startTime, cut.endTime)
+                            onSelect()
+                        }
+                        guard let trimBase else { return }
+                        let deltaSeconds = Double(value.translation.width / max(trackWidth, 1)) * duration
+                        switch edge {
+                        case .start:
+                            let nextStart = min(max(0, trimBase.start + deltaSeconds), trimBase.end - 0.1)
+                            onTrimStart(nextStart)
+                        case .end:
+                            let nextEnd = max(min(duration, trimBase.end + deltaSeconds), trimBase.start + 0.1)
+                            onTrimEnd(nextEnd)
+                        }
+                    }
+                    .onEnded { _ in
+                        trimBase = nil
+                    }
+            )
+            .help(edge == .start ? t("Trim Start") : t("Trim End"))
     }
 
     private func timeString(_ seconds: Double) -> String {
