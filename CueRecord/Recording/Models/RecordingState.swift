@@ -105,7 +105,7 @@ enum CameraOverlaySize: CaseIterable, Hashable {
     }
 }
 
-enum CameraOverlayShape: CaseIterable, Hashable {
+nonisolated enum CameraOverlayShape: CaseIterable, Hashable, Codable, Sendable {
     case circle
     case roundedSquare
     case roundedBox

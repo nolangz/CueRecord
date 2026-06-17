@@ -24,6 +24,17 @@ private nonisolated struct CameraOverlayMetadataSample: Codable, Sendable {
     let size: String
 }
 
+private nonisolated struct ResolvedRecordingEditCut: Sendable {
+    let cut: RecordingEditCut
+    let startSeconds: Double
+    let endSeconds: Double
+    let outputStartSeconds: Double
+
+    var duration: Double {
+        max(0, endSeconds - startSeconds)
+    }
+}
+
 private nonisolated struct CodableRect: Codable, Equatable, Sendable {
     let x: Double
     let y: Double
@@ -1258,6 +1269,63 @@ class ScreenRecorder: NSObject, ObservableObject {
         }
     }
 
+    private nonisolated static func exportEditedRecordingIfNeeded(
+        for screenURL: URL,
+        cameraURL: URL?,
+        overlayMetadataURL: URL?,
+        decision: RecordingEditDecision
+    ) async -> URL? {
+        let editedURL = Self.siblingOutputURL(for: screenURL, suffix: "edited", extension: "mov")
+        let tempVideoURL = Self.siblingOutputURL(for: screenURL, suffix: "edited_video_tmp", extension: "mov")
+
+        do {
+            let metadata = overlayMetadataURL.flatMap { url -> CameraOverlayMetadataFile? in
+                guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+                guard let data = try? Data(contentsOf: url) else { return nil }
+                return try? JSONDecoder().decode(CameraOverlayMetadataFile.self, from: data)
+            }
+
+            try? FileManager.default.removeItem(at: editedURL)
+            try? FileManager.default.removeItem(at: tempVideoURL)
+
+            print("🎞️  Rendering edited recording: \(editedURL.lastPathComponent)")
+            let rendered = try Self.renderEditedVideo(
+                screenURL: screenURL,
+                cameraURL: cameraURL,
+                metadata: metadata,
+                decision: decision,
+                outputURL: tempVideoURL
+            )
+
+            guard rendered else {
+                print("❌ Edited recording render failed")
+                try? FileManager.default.removeItem(at: tempVideoURL)
+                return nil
+            }
+
+            let muxed = await Self.muxAudioFromScreenVideo(
+                screenURL: screenURL,
+                videoOnlyURL: tempVideoURL,
+                outputURL: editedURL,
+                cuts: decision.cuts
+            )
+
+            if muxed {
+                try? FileManager.default.removeItem(at: tempVideoURL)
+                print("✅ Edited recording saved: \(editedURL.lastPathComponent)")
+            } else {
+                try FileManager.default.moveItem(at: tempVideoURL, to: editedURL)
+                print("✅ Edited recording saved without audio remux: \(editedURL.lastPathComponent)")
+            }
+
+            return editedURL
+        } catch {
+            print("❌ Edited recording render failed: \(error.localizedDescription)")
+            try? FileManager.default.removeItem(at: tempVideoURL)
+            return nil
+        }
+    }
+
     private nonisolated static func renderCompositedVideo(
         screenURL: URL,
         cameraURL: URL,
@@ -1403,6 +1471,193 @@ class ScreenRecorder: NSObject, ObservableObject {
         writerInput.markAsFinished()
         screenReader.cancelReading()
         cameraReader.cancelReading()
+
+        let completed = DispatchSemaphore(value: 0)
+        writer.finishWriting {
+            completed.signal()
+        }
+        completed.wait()
+
+        return writer.status == .completed
+    }
+
+    private nonisolated static func renderEditedVideo(
+        screenURL: URL,
+        cameraURL: URL?,
+        metadata: CameraOverlayMetadataFile?,
+        decision: RecordingEditDecision,
+        outputURL: URL
+    ) throws -> Bool {
+        let screenAsset = AVURLAsset(url: screenURL)
+        guard let screenTrack = screenAsset.tracks(withMediaType: .video).first else {
+            return false
+        }
+
+        let screenSize = Self.normalizedVideoSize(for: screenTrack)
+        let outputWidth = max(2, Int(screenSize.width.rounded(.down)) / 2 * 2)
+        let outputHeight = max(2, Int(screenSize.height.rounded(.down)) / 2 * 2)
+        let outputExtent = CGRect(x: 0, y: 0, width: outputWidth, height: outputHeight)
+
+        let screenReader = try AVAssetReader(asset: screenAsset)
+        let readerSettings: [String: Any] = [
+            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA
+        ]
+
+        let screenOutput = AVAssetReaderTrackOutput(track: screenTrack, outputSettings: readerSettings)
+        screenOutput.alwaysCopiesSampleData = false
+        guard screenReader.canAdd(screenOutput) else { return false }
+        screenReader.add(screenOutput)
+
+        var cameraReader: AVAssetReader?
+        var cameraOutput: AVAssetReaderTrackOutput?
+        if let cameraURL {
+            let cameraAsset = AVURLAsset(url: cameraURL)
+            if let cameraTrack = cameraAsset.tracks(withMediaType: .video).first {
+                let reader = try AVAssetReader(asset: cameraAsset)
+                let output = AVAssetReaderTrackOutput(track: cameraTrack, outputSettings: readerSettings)
+                output.alwaysCopiesSampleData = false
+                if reader.canAdd(output) {
+                    reader.add(output)
+                    cameraReader = reader
+                    cameraOutput = output
+                }
+            }
+        }
+
+        let resolvedCuts = Self.resolvedEditCuts(
+            decision.cuts,
+            totalDuration: CMTimeGetSeconds(screenAsset.duration),
+            hasCamera: cameraOutput != nil
+        )
+        guard !resolvedCuts.isEmpty else { return false }
+
+        let writer = try AVAssetWriter(outputURL: outputURL, fileType: .mov)
+        let editedBitRate = max(
+            8_000_000,
+            outputWidth * outputHeight * 3 * Self.screenTargetFrameRate / 30
+        )
+        let videoSettings: [String: Any] = [
+            AVVideoCodecKey: AVVideoCodecType.h264,
+            AVVideoWidthKey: outputWidth,
+            AVVideoHeightKey: outputHeight,
+            AVVideoColorPropertiesKey: Self.rec709VideoColorProperties(),
+            AVVideoCompressionPropertiesKey: [
+                AVVideoAverageBitRateKey: editedBitRate,
+                AVVideoMaxKeyFrameIntervalKey: Self.screenTargetFrameRate / 2,
+                AVVideoProfileLevelKey: AVVideoProfileLevelH264HighAutoLevel,
+                AVVideoAllowFrameReorderingKey: false,
+                AVVideoExpectedSourceFrameRateKey: Self.screenTargetFrameRate,
+                AVVideoQualityKey: 0.92
+            ]
+        ]
+
+        let writerInput = AVAssetWriterInput(mediaType: .video, outputSettings: videoSettings)
+        writerInput.expectsMediaDataInRealTime = false
+
+        let pixelBufferAttributes: [String: Any] = [
+            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
+            kCVPixelBufferWidthKey as String: outputWidth,
+            kCVPixelBufferHeightKey as String: outputHeight,
+            kCVPixelBufferCGImageCompatibilityKey as String: true,
+            kCVPixelBufferCGBitmapContextCompatibilityKey as String: true
+        ]
+
+        let adapter = AVAssetWriterInputPixelBufferAdaptor(
+            assetWriterInput: writerInput,
+            sourcePixelBufferAttributes: pixelBufferAttributes
+        )
+
+        guard writer.canAdd(writerInput) else { return false }
+        writer.add(writerInput)
+
+        guard screenReader.startReading(),
+              writer.startWriting() else {
+            return false
+        }
+
+        if cameraReader?.startReading() != true {
+            cameraReader = nil
+            cameraOutput = nil
+        }
+
+        writer.startSession(atSourceTime: .zero)
+
+        let ciContext = CIContext()
+        var currentCameraPixelBuffer: CVPixelBuffer?
+        var nextCameraSample = cameraOutput?.copyNextSampleBuffer()
+        var maskCache: [String: CIImage] = [:]
+        var cutIndex = 0
+
+        func advanceCameraFrame(to screenTime: CMTime) {
+            while let sample = nextCameraSample {
+                let sampleTime = CMSampleBufferGetPresentationTimeStamp(sample)
+                guard sampleTime <= screenTime || currentCameraPixelBuffer == nil else {
+                    break
+                }
+
+                if let pixelBuffer = CMSampleBufferGetImageBuffer(sample) {
+                    currentCameraPixelBuffer = pixelBuffer
+                }
+
+                nextCameraSample = cameraOutput?.copyNextSampleBuffer()
+            }
+        }
+
+        while let screenSample = screenOutput.copyNextSampleBuffer() {
+            let screenTime = CMSampleBufferGetPresentationTimeStamp(screenSample)
+            let screenSeconds = CMTimeGetSeconds(screenTime)
+            guard screenSeconds.isFinite else { continue }
+
+            while cutIndex < resolvedCuts.count,
+                  screenSeconds >= resolvedCuts[cutIndex].endSeconds {
+                cutIndex += 1
+            }
+
+            guard cutIndex < resolvedCuts.count else { break }
+
+            let resolvedCut = resolvedCuts[cutIndex]
+            guard screenSeconds >= resolvedCut.startSeconds,
+                  screenSeconds <= resolvedCut.endSeconds else {
+                continue
+            }
+
+            advanceCameraFrame(to: screenTime)
+
+            guard let screenPixelBuffer = CMSampleBufferGetImageBuffer(screenSample),
+                  let outputPixelBuffer = Self.createPixelBuffer(from: adapter) else {
+                continue
+            }
+
+            let screenImage = CIImage(cvPixelBuffer: screenPixelBuffer)
+            let cameraImage = currentCameraPixelBuffer.map { CIImage(cvPixelBuffer: $0) }
+            let overlaySample = metadata.map { Self.overlaySample(at: screenSeconds, in: $0.samples) } ?? nil
+            let composedImage = Self.composeEditedImage(
+                screenImage,
+                cameraImage: cameraImage,
+                cut: resolvedCut.cut,
+                overlaySample: overlaySample,
+                outputExtent: outputExtent,
+                maskCache: &maskCache
+            )
+
+            ciContext.render(
+                composedImage,
+                to: outputPixelBuffer,
+                bounds: outputExtent,
+                colorSpace: CGColorSpaceCreateDeviceRGB()
+            )
+
+            while !writerInput.isReadyForMoreMediaData {
+                Thread.sleep(forTimeInterval: 0.002)
+            }
+
+            let outputSeconds = resolvedCut.outputStartSeconds + (screenSeconds - resolvedCut.startSeconds)
+            adapter.append(outputPixelBuffer, withPresentationTime: CMTime(seconds: outputSeconds, preferredTimescale: 600))
+        }
+
+        writerInput.markAsFinished()
+        screenReader.cancelReading()
+        cameraReader?.cancelReading()
 
         let completed = DispatchSemaphore(value: 0)
         writer.finishWriting {
@@ -1619,6 +1874,60 @@ class ScreenRecorder: NSObject, ObservableObject {
         return blendedImage.cropped(to: outputExtent)
     }
 
+    private nonisolated static func composeEditedImage(
+        _ screenImage: CIImage,
+        cameraImage: CIImage?,
+        cut: RecordingEditCut,
+        overlaySample: CameraOverlayMetadataSample?,
+        outputExtent: CGRect,
+        maskCache: inout [String: CIImage]
+    ) -> CIImage {
+        let screenBase = screenImage.cropped(to: outputExtent)
+
+        switch cut.layoutMode {
+        case .screenFullScreen:
+            return screenBase
+
+        case .cameraFullScreen:
+            guard let cameraImage else { return screenBase }
+            return Self.aspectFill(
+                cameraImage,
+                sourceExtent: cameraImage.extent,
+                targetRect: outputExtent
+            )
+            .cropped(to: outputExtent)
+
+        case .screenWithCamera:
+            guard let cameraImage else { return screenBase }
+
+            let targetRect = cut.cameraFrame.videoRect(in: outputExtent)
+            guard targetRect.width > 1, targetRect.height > 1 else {
+                return screenBase
+            }
+
+            let scaledCamera = Self.aspectFill(
+                cameraImage,
+                sourceExtent: cameraImage.extent,
+                targetRect: targetRect
+            )
+
+            let shape = Self.metadataShapeValue(for: cut.cameraShape)
+            let mask = Self.overlayMask(
+                size: targetRect.size,
+                shape: shape,
+                cache: &maskCache
+            )
+            .transformed(by: CGAffineTransform(translationX: targetRect.minX, y: targetRect.minY))
+
+            let blendedImage = scaledCamera.applyingFilter("CIBlendWithMask", parameters: [
+                kCIInputBackgroundImageKey: screenBase,
+                kCIInputMaskImageKey: mask
+            ])
+
+            return blendedImage.cropped(to: outputExtent)
+        }
+    }
+
     private nonisolated static func aspectFill(
         _ image: CIImage,
         sourceExtent: CGRect,
@@ -1707,6 +2016,66 @@ class ScreenRecorder: NSObject, ObservableObject {
         return mask
     }
 
+    private nonisolated static func metadataShapeValue(for shape: CameraOverlayShape) -> String {
+        switch shape {
+        case .circle:
+            return "circle"
+        case .roundedSquare:
+            return "roundedRectangle"
+        case .roundedBox:
+            return "roundedSquare"
+        }
+    }
+
+    private nonisolated static func resolvedEditCuts(
+        _ cuts: [RecordingEditCut],
+        totalDuration: Double,
+        hasCamera: Bool
+    ) -> [ResolvedRecordingEditCut] {
+        let safeDuration = max(totalDuration.isFinite ? totalDuration : 0, 0.1)
+        var outputStart = 0.0
+
+        let sanitizedCuts = cuts
+            .map { cut -> RecordingEditCut in
+                var sanitized = cut
+                sanitized.startTime = min(max(0, sanitized.startTime), safeDuration)
+                sanitized.endTime = min(max(sanitized.startTime + 0.05, sanitized.endTime), safeDuration)
+                if sanitized.layoutMode.requiresCamera && !hasCamera {
+                    sanitized.layoutMode = .screenFullScreen
+                }
+                sanitized.cameraFrame = sanitized.cameraFrame.clamped()
+                return sanitized
+            }
+            .filter { $0.duration > 0.05 }
+            .sorted { $0.startTime < $1.startTime }
+
+        let sourceCuts: [RecordingEditCut]
+        if sanitizedCuts.isEmpty {
+            sourceCuts = [
+                RecordingEditCut(
+                    startTime: 0,
+                    endTime: safeDuration,
+                    layoutMode: hasCamera ? .screenWithCamera : .screenFullScreen,
+                    cameraFrame: .defaultCameraFrame,
+                    cameraShape: .circle
+                )
+            ]
+        } else {
+            sourceCuts = sanitizedCuts
+        }
+
+        return sourceCuts.map { cut in
+            let resolved = ResolvedRecordingEditCut(
+                cut: cut,
+                startSeconds: cut.startTime,
+                endSeconds: cut.endTime,
+                outputStartSeconds: outputStart
+            )
+            outputStart += resolved.duration
+            return resolved
+        }
+    }
+
     private nonisolated static func overlaySample(
         at seconds: Double,
         in samples: [CameraOverlayMetadataSample]
@@ -1738,7 +2107,8 @@ class ScreenRecorder: NSObject, ObservableObject {
     private nonisolated static func muxAudioFromScreenVideo(
         screenURL: URL,
         videoOnlyURL: URL,
-        outputURL: URL
+        outputURL: URL,
+        cuts: [RecordingEditCut]? = nil
     ) async -> Bool {
         let screenAsset = AVURLAsset(url: screenURL)
         let videoAsset = AVURLAsset(url: videoOnlyURL)
@@ -1747,6 +2117,17 @@ class ScreenRecorder: NSObject, ObservableObject {
         guard !audioTracks.isEmpty,
               let videoTrack = videoAsset.tracks(withMediaType: .video).first else {
             return false
+        }
+
+        if let cuts {
+            return await Self.muxVideoWithEditedAudio(
+                videoAsset: videoAsset,
+                videoTrack: videoTrack,
+                sourceDuration: screenAsset.duration,
+                audioTracks: audioTracks,
+                outputURL: outputURL,
+                cuts: cuts
+            )
         }
 
         if audioTracks.count > 1 {
@@ -1781,6 +2162,93 @@ class ScreenRecorder: NSObject, ObservableObject {
             audioTracks: audioTracks,
             outputURL: outputURL
         )
+    }
+
+    private nonisolated static func muxVideoWithEditedAudio(
+        videoAsset: AVURLAsset,
+        videoTrack: AVAssetTrack,
+        sourceDuration: CMTime,
+        audioTracks: [AVAssetTrack],
+        outputURL: URL,
+        cuts: [RecordingEditCut]
+    ) async -> Bool {
+        let sourceDurationSeconds = CMTimeGetSeconds(sourceDuration)
+        let resolvedCuts = Self.resolvedEditCuts(
+            cuts,
+            totalDuration: sourceDurationSeconds,
+            hasCamera: true
+        )
+        guard !resolvedCuts.isEmpty else { return false }
+
+        let composition = AVMutableComposition()
+        guard let compositionVideoTrack = composition.addMutableTrack(
+            withMediaType: .video,
+            preferredTrackID: kCMPersistentTrackID_Invalid
+        ) else {
+            return false
+        }
+
+        do {
+            try compositionVideoTrack.insertTimeRange(
+                CMTimeRange(start: .zero, duration: videoAsset.duration),
+                of: videoTrack,
+                at: .zero
+            )
+            compositionVideoTrack.preferredTransform = videoTrack.preferredTransform
+        } catch {
+            print("❌ Edited video mux failed: \(error.localizedDescription)")
+            return false
+        }
+
+        var mixParameters: [AVAudioMixInputParameters] = []
+        for (index, audioTrack) in audioTracks.enumerated() {
+            guard let compositionAudioTrack = composition.addMutableTrack(
+                withMediaType: .audio,
+                preferredTrackID: kCMPersistentTrackID_Invalid
+            ) else {
+                continue
+            }
+
+            for resolvedCut in resolvedCuts {
+                let sourceStart = CMTime(seconds: resolvedCut.startSeconds, preferredTimescale: 600)
+                let sourceDuration = CMTime(seconds: resolvedCut.duration, preferredTimescale: 600)
+                let destinationStart = CMTime(seconds: resolvedCut.outputStartSeconds, preferredTimescale: 600)
+
+                do {
+                    try compositionAudioTrack.insertTimeRange(
+                        CMTimeRange(start: sourceStart, duration: sourceDuration),
+                        of: audioTrack,
+                        at: destinationStart
+                    )
+                } catch {
+                    print("⚠️  Failed to insert edited audio segment: \(error.localizedDescription)")
+                }
+            }
+
+            let parameters = AVMutableAudioMixInputParameters(track: compositionAudioTrack)
+            parameters.setVolume(audioMixVolume(forAudioTrackAt: index, trackCount: audioTracks.count), at: .zero)
+            mixParameters.append(parameters)
+        }
+
+        guard let exporter = AVAssetExportSession(asset: composition, presetName: AVAssetExportPresetHighestQuality) else {
+            return false
+        }
+
+        if !mixParameters.isEmpty {
+            let audioMix = AVMutableAudioMix()
+            audioMix.inputParameters = mixParameters
+            exporter.audioMix = audioMix
+        }
+
+        exporter.outputURL = outputURL
+        exporter.outputFileType = .mov
+        exporter.shouldOptimizeForNetworkUse = false
+
+        return await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
+            exporter.exportAsynchronously {
+                continuation.resume(returning: exporter.status == .completed)
+            }
+        }
     }
 
     private nonisolated static func exportSingleMixedAudioTrack(
@@ -2040,6 +2508,14 @@ class ScreenRecorder: NSObject, ObservableObject {
                 cameraURL: capturedOutput.cameraURL,
                 overlayMetadataURL: capturedOutput.overlayMetadataURL
             )
+        case .edited(let decision):
+            compositedURL = await Self.exportEditedRecordingIfNeeded(
+                for: outputURL,
+                cameraURL: capturedOutput.cameraURL,
+                overlayMetadataURL: capturedOutput.overlayMetadataURL,
+                decision: decision
+            )
+            cameraOnlyURL = nil
         }
 
         let finalOutputURL = compositedURL

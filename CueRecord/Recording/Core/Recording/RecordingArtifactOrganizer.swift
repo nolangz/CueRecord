@@ -3,6 +3,7 @@ import Foundation
 nonisolated enum RecordingRenderMode: Equatable, Sendable {
     case all
     case cameraOnlyTransparent
+    case edited(RecordingEditDecision)
 
     var statusText: String {
         switch self {
@@ -10,6 +11,8 @@ nonisolated enum RecordingRenderMode: Equatable, Sendable {
             return "Rendering recording"
         case .cameraOnlyTransparent:
             return "Rendering camera"
+        case .edited:
+            return "Rendering edit"
         }
     }
 }

@@ -87,6 +87,7 @@ struct ContentView: View {
     @State private var aiScriptCompletionResetTask: Task<Void, Never>?
     @State private var setupCompleted = AppSetupPreferences.initialSetupCompleted
     @State private var recordingPreviewBarWindow = RecordingPreviewBarWindow()
+    @State private var recordingEditorWindow = RecordingEditorWindow()
     @State private var hidesMainUIForRecordingPreview = false
     @State private var mainWindowsHiddenForRecordingPreview: [NSWindow] = []
     @State private var isShowingPostRecordingOptions = false
@@ -1426,7 +1427,7 @@ struct ContentView: View {
     }
 
     private func presentPostRecordingRenderOptions(retryIfNeeded: Bool = true) {
-        guard recordingController.hasPendingCapturedRecording else {
+        guard let capturedOutput = recordingController.pendingCapturedRecording else {
             if retryIfNeeded {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
                     presentPostRecordingRenderOptions(retryIfNeeded: false)
@@ -1441,19 +1442,19 @@ struct ContentView: View {
         isShowingPostRecordingOptions = true
         restoreMainUIAfterRecordingPreview(focusEditor: false)
         DispatchQueue.main.async {
-            recordingPreviewBarWindow.showRenderOptions(
+            recordingEditorWindow.show(
                 controller: recordingController,
+                capturedOutput: capturedOutput,
                 onDelete: {
                     isShowingPostRecordingOptions = false
                     recordingController.deletePendingCapturedRecording()
                 },
-                onRenderAll: {
+                onExport: { decision in
                     isShowingPostRecordingOptions = false
-                    recordingController.renderPendingCapturedRecording(mode: .all)
+                    recordingController.renderPendingCapturedRecording(editDecision: decision)
                 },
-                onRenderCameraOnly: {
+                onClose: {
                     isShowingPostRecordingOptions = false
-                    recordingController.renderPendingCapturedRecording(mode: .cameraOnlyTransparent)
                 }
             )
         }

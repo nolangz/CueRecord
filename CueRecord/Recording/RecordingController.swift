@@ -424,6 +424,10 @@ final class RecordingController: ObservableObject {
         screenRecorder.renderCapturedRecording(capturedOutput, mode: mode)
     }
 
+    func renderPendingCapturedRecording(editDecision: RecordingEditDecision) {
+        renderPendingCapturedRecording(mode: .edited(editDecision))
+    }
+
     func deletePendingCapturedRecording() {
         guard let capturedOutput = pendingCapturedRecording else { return }
         pendingCapturedRecording = nil
@@ -441,7 +445,7 @@ final class RecordingController: ObservableObject {
         switch event {
         case .started(_, let mode):
             isExporting = true
-            exportStatusText = mode.statusText
+            exportStatusText = uiText(mode.statusText)
         case .completed(let result):
             isExporting = false
             exportStatusText = nil
