@@ -175,6 +175,13 @@ struct ExternalDisplayView: View {
         ZStack {
             Color.black.ignoresSafeArea()
 
+            AudienceFaceBackdropView(
+                face: NotchSettings.shared.audienceFace,
+                opacity: 0.12,
+                verticalPosition: 0.54
+            )
+            .ignoresSafeArea()
+
             if isDone && (listeningMode == .wordTracking || hasNextPage) {
                 doneView
             } else {

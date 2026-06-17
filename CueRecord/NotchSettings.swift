@@ -312,6 +312,55 @@ enum ListeningMode: String, CaseIterable, Identifiable {
     }
 }
 
+// MARK: - Audience Face
+
+enum AudienceFace: String, CaseIterable, Identifiable {
+    case off, male, female
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .off: return "Off"
+        case .male: return "Male"
+        case .female: return "Female"
+        }
+    }
+
+    var assetName: String? {
+        switch self {
+        case .off: return nil
+        case .male: return "AudienceFaceMale"
+        case .female: return "AudienceFaceFemale"
+        }
+    }
+}
+
+struct AudienceFaceBackdropView: View {
+    let face: AudienceFace
+    var opacity: Double = 0.18
+    var verticalPosition: CGFloat = 0.62
+
+    var body: some View {
+        GeometryReader { geometry in
+            if let assetName = face.assetName {
+                let side = max(geometry.size.width * 1.12, geometry.size.height * 1.9)
+
+                Image(assetName)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: side, height: side)
+                    .position(x: geometry.size.width / 2, y: geometry.size.height * verticalPosition)
+                    .opacity(opacity)
+                    .saturation(0.9)
+            }
+        }
+        .clipped()
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+}
+
 // MARK: - Settings
 
 @Observable
@@ -351,6 +400,10 @@ class NotchSettings {
 
     var cueBrightness: CueBrightness {
         didSet { UserDefaults.standard.set(cueBrightness.rawValue, forKey: "cueBrightness") }
+    }
+
+    var audienceFace: AudienceFace {
+        didSet { UserDefaults.standard.set(audienceFace.rawValue, forKey: "audienceFace") }
     }
 
     var overlayMode: OverlayMode {
@@ -479,6 +532,7 @@ class NotchSettings {
         self.fontColorPreset = FontColorPreset(rawValue: UserDefaults.standard.string(forKey: "fontColorPreset") ?? "") ?? .white
         self.cueColorPreset = FontColorPreset(rawValue: UserDefaults.standard.string(forKey: "cueColorPreset") ?? "") ?? .white
         self.cueBrightness = CueBrightness(rawValue: UserDefaults.standard.string(forKey: "cueBrightness") ?? "") ?? .dim
+        self.audienceFace = AudienceFace(rawValue: UserDefaults.standard.string(forKey: "audienceFace") ?? "") ?? .off
         self.overlayMode = OverlayMode(rawValue: UserDefaults.standard.string(forKey: "overlayMode") ?? "") ?? .pinned
         self.notchDisplayMode = NotchDisplayMode(rawValue: UserDefaults.standard.string(forKey: "notchDisplayMode") ?? "") ?? .followMouse
         let savedPinnedScreenID = UserDefaults.standard.integer(forKey: "pinnedScreenID")

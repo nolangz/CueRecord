@@ -199,6 +199,10 @@ struct NotchPreviewContent: View {
                 .opacity(Double(offsetPhase))
                 .frame(width: currentWidth, height: contentHeight)
 
+                AudienceFaceBackdropView(face: settings.audienceFace, opacity: 0.18)
+                    .frame(width: currentWidth, height: contentHeight)
+                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+
                 VStack(spacing: 0) {
                     SpeechScrollView(
                         words: Self.loremWords,
@@ -773,17 +777,36 @@ struct SettingsView: View {
         ScrollView(.vertical, showsIndicators: false) {
             VStack(alignment: .leading, spacing: 14) {
                 // Overlay mode picker
-            Picker("", selection: $settings.overlayMode) {
-                ForEach(OverlayMode.allCases) { mode in
-                    Text(mode.localizedLabel).tag(mode)
+                Picker("", selection: $settings.overlayMode) {
+                    ForEach(OverlayMode.allCases) { mode in
+                        Text(mode.localizedLabel).tag(mode)
+                    }
                 }
-            }
                 .pickerStyle(.segmented)
                 .labelsHidden()
 
-            Text(settings.overlayMode.localizedDescription)
+                Text(settings.overlayMode.localizedDescription)
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
+
+                Divider()
+
+                Text(t("Audience Face"))
+                    .font(.system(size: 13, weight: .medium))
+
+                Picker("", selection: $settings.audienceFace) {
+                    ForEach(AudienceFace.allCases) { face in
+                        Text(face.localizedLabel).tag(face)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+
+                Text(t("Shows a semi-transparent curious cartoon face behind the teleprompter text."))
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+
+                audienceFacePreview
 
                 if settings.overlayMode == .pinned {
                     Divider()
@@ -1044,6 +1067,34 @@ struct SettingsView: View {
         }
         .padding(16)
         .onAppear { refreshScreens() }
+    }
+
+    @ViewBuilder
+    private var audienceFacePreview: some View {
+        if settings.audienceFace != .off {
+            ZStack {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(Color.black)
+
+                AudienceFaceBackdropView(face: settings.audienceFace, opacity: 0.26)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(t("Preview"))
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.42))
+                    Text(t("Stay curious. Keep reading."))
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(.white)
+                    Text(t("The face stays below the words."))
+                        .font(.system(size: 12))
+                        .foregroundStyle(.white.opacity(0.54))
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(14)
+            }
+            .frame(height: 104)
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        }
     }
 
     // MARK: - Remote Tab
@@ -1379,6 +1430,7 @@ struct SettingsView: View {
         settings.fontColorPreset = .white
         settings.cueColorPreset = .white
         settings.cueBrightness = .dim
+        settings.audienceFace = .off
         settings.overlayMode = .pinned
         settings.notchDisplayMode = .followMouse
         settings.pinnedScreenID = 0

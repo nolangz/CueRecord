@@ -182,6 +182,12 @@ final class InterfaceLanguageSettings: ObservableObject {
         "Amount": "程度",
         "More transparent": "更透明",
         "Less transparent": "更不透明",
+        "Audience Face": "观众脸",
+        "Male": "男生",
+        "Female": "女生",
+        "Shows a semi-transparent curious cartoon face behind the teleprompter text.": "在提词器文字下方显示一个半透明、求知若渴的卡通脸。",
+        "Stay curious. Keep reading.": "保持好奇，继续读。",
+        "The face stays below the words.": "头像会留在文字下方。",
         "Follow Cursor": "跟随光标",
         "The window follows your cursor and sticks to its bottom-right.": "窗口会跟随光标，并贴在光标右下方。",
         "Glass Effect": "玻璃效果",
@@ -416,6 +422,10 @@ extension FontColorPreset {
 }
 
 extension CueBrightness {
+    var localizedLabel: String { uiText(label) }
+}
+
+extension AudienceFace {
     var localizedLabel: String { uiText(label) }
 }
 

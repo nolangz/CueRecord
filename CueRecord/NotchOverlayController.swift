@@ -794,6 +794,13 @@ struct NotchOverlayView: View {
                     .frame(width: currentWidth, height: currentHeight)
                 }
 
+                AudienceFaceBackdropView(face: NotchSettings.shared.audienceFace, opacity: 0.18)
+                    .frame(width: currentWidth, height: currentHeight)
+                    .clipShape(DynamicIslandShape(
+                        topInset: currentTopInset,
+                        bottomRadius: currentBottomRadius
+                    ))
+
                 // Content - appears after container expands
                 if contentVisible {
                     VStack(spacing: 0) {
@@ -1296,13 +1303,17 @@ struct FloatingOverlayView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            if content.showPagePicker {
-                floatingPagePickerView
-            } else if isDone && (listeningMode == .wordTracking || hasNextPage) {
-                floatingDoneView
-            } else {
-                floatingPrompterView
+        ZStack {
+            AudienceFaceBackdropView(face: NotchSettings.shared.audienceFace, opacity: 0.18)
+
+            VStack(spacing: 0) {
+                if content.showPagePicker {
+                    floatingPagePickerView
+                } else if isDone && (listeningMode == .wordTracking || hasNextPage) {
+                    floatingDoneView
+                } else {
+                    floatingPrompterView
+                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
