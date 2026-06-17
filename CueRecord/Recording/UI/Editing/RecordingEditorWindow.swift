@@ -702,8 +702,16 @@ private struct RecordingEditorTimeline: View {
     private let horizontalPadding: CGFloat = 12
     private let rulerHeight: CGFloat = 34
     private let trackHeight: CGFloat = 72
-    private let minimumPixelsPerSecond: CGFloat = 48
-    private let maximumContentWidth: CGFloat = 18_000
+    private let minimumPixelsPerSecond: CGFloat = 4
+    private let defaultPixelsPerSecond: CGFloat = 48
+    private let maximumPixelsPerSecond: CGFloat = 260
+    private let maximumContentWidth: CGFloat = 64_000
+    private let playheadAnchorID = "recordingTimelinePlayheadAnchor"
+
+    @State private var pixelsPerSecond: CGFloat = 48
+    @State private var lastTimelineViewportWidth: CGFloat = 0
+    @State private var isPlayheadSelected = false
+    @State private var playheadDragBaseTime: Double?
 
     private func t(_ english: String) -> String {
         interfaceLanguage.text(english)
@@ -718,6 +726,9 @@ private struct RecordingEditorTimeline: View {
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
                 Spacer()
+
+                timelineZoomControls
+
                 Button {
                     session.addCut()
                 } label: {
@@ -743,27 +754,39 @@ private struct RecordingEditorTimeline: View {
             GeometryReader { geometry in
                 let duration = max(session.duration, 0.1)
                 let viewportWidth = max(geometry.size.width - trackHeaderWidth - horizontalPadding * 2, 1)
-                let desiredContentWidth = max(viewportWidth, CGFloat(duration) * minimumPixelsPerSecond)
+                let desiredContentWidth = max(viewportWidth, CGFloat(duration) * pixelsPerSecond)
                 let contentWidth = min(desiredContentWidth, max(viewportWidth, maximumContentWidth))
+                let effectivePixelsPerSecond = contentWidth / CGFloat(duration)
+                let playheadX = contentWidth * CGFloat(session.playheadTime / duration)
 
                 VStack(spacing: 0) {
                     HStack(spacing: 0) {
                         trackGutter
                             .frame(width: trackHeaderWidth, height: rulerHeight + trackHeight)
 
-                        ScrollView(.horizontal, showsIndicators: true) {
-                            ZStack(alignment: .topLeading) {
-                                timelineRuler(width: contentWidth, duration: duration)
-                                    .frame(width: contentWidth, height: rulerHeight)
+                        ScrollViewReader { scrollProxy in
+                            ScrollView(.horizontal, showsIndicators: true) {
+                                ZStack(alignment: .topLeading) {
+                                    playheadScrollAnchor(x: playheadX, width: contentWidth)
 
-                                timelineTrack(width: contentWidth, duration: duration)
-                                    .frame(width: contentWidth, height: trackHeight)
-                                    .offset(y: rulerHeight)
+                                    timelineRuler(width: contentWidth, duration: duration, pixelsPerSecond: effectivePixelsPerSecond)
+                                        .frame(width: contentWidth, height: rulerHeight)
+                                        .gesture(timelineScrubGesture(width: contentWidth, duration: duration))
 
-                                playhead(height: rulerHeight + trackHeight)
-                                    .offset(x: contentWidth * CGFloat(session.playheadTime / duration), y: 0)
+                                    timelineTrack(width: contentWidth, duration: duration, pixelsPerSecond: effectivePixelsPerSecond)
+                                        .frame(width: contentWidth, height: trackHeight)
+                                        .offset(y: rulerHeight)
+
+                                    playhead(height: rulerHeight + trackHeight, contentWidth: contentWidth, duration: duration)
+                                        .offset(x: playheadX - 12, y: 0)
+                                }
+                                .frame(width: contentWidth, height: rulerHeight + trackHeight, alignment: .topLeading)
                             }
-                            .frame(width: contentWidth, height: rulerHeight + trackHeight, alignment: .topLeading)
+                            .onChange(of: pixelsPerSecond) { _, _ in
+                                withAnimation(.easeOut(duration: 0.16)) {
+                                    scrollProxy.scrollTo(playheadAnchorID, anchor: .center)
+                                }
+                            }
                         }
                     }
                     .padding(.horizontal, horizontalPadding)
@@ -771,10 +794,90 @@ private struct RecordingEditorTimeline: View {
                     Spacer(minLength: 0)
                 }
                 .padding(.top, 10)
+                .onAppear {
+                    updateTimelineViewport(width: viewportWidth)
+                    pixelsPerSecond = clampedPixelsPerSecond(pixelsPerSecond == defaultPixelsPerSecond ? defaultPixelsPerSecond : pixelsPerSecond)
+                }
+                .onChange(of: viewportWidth) { _, newWidth in
+                    updateTimelineViewport(width: newWidth)
+                }
             }
         }
         .padding(.bottom, 10)
         .background(.bar)
+    }
+
+    private var timelineZoomControls: some View {
+        HStack(spacing: 8) {
+            ControlGroup {
+                Button {
+                    zoomOut()
+                } label: {
+                    Label(t("Zoom Out"), systemImage: "minus.magnifyingglass")
+                }
+                .labelStyle(.iconOnly)
+                .keyboardShortcut("-", modifiers: .command)
+                .disabled(pixelsPerSecond <= minimumPixelsPerSecond + 0.01)
+                .help(t("Zoom Out"))
+
+                Button {
+                    zoomToFit()
+                } label: {
+                    Label(t("Zoom to Fit"), systemImage: "arrow.left.and.right")
+                }
+                .labelStyle(.iconOnly)
+                .keyboardShortcut("0", modifiers: .command)
+                .help(t("Zoom to Fit"))
+
+                Button {
+                    zoomIn()
+                } label: {
+                    Label(t("Zoom In"), systemImage: "plus.magnifyingglass")
+                }
+                .labelStyle(.iconOnly)
+                .keyboardShortcut("+", modifiers: .command)
+                .disabled(pixelsPerSecond >= maximumPixelsPerSecond - 0.01)
+                .help(t("Zoom In"))
+            }
+            .controlSize(.small)
+
+            Slider(value: timelineZoomBinding, in: Double(minimumPixelsPerSecond)...Double(maximumPixelsPerSecond)) {
+                Text(t("Timeline Zoom"))
+            }
+            .controlSize(.small)
+            .frame(width: 92)
+            .help(t("Timeline Zoom"))
+        }
+    }
+
+    private var timelineZoomBinding: Binding<Double> {
+        Binding {
+            Double(pixelsPerSecond)
+        } set: { value in
+            pixelsPerSecond = clampedPixelsPerSecond(CGFloat(value))
+        }
+    }
+
+    private func updateTimelineViewport(width: CGFloat) {
+        lastTimelineViewportWidth = max(width, 1)
+    }
+
+    private func zoomIn() {
+        pixelsPerSecond = clampedPixelsPerSecond(pixelsPerSecond * 1.24)
+    }
+
+    private func zoomOut() {
+        pixelsPerSecond = clampedPixelsPerSecond(pixelsPerSecond / 1.24)
+    }
+
+    private func zoomToFit() {
+        let duration = max(session.duration, 0.1)
+        let viewportWidth = max(lastTimelineViewportWidth, 1)
+        pixelsPerSecond = clampedPixelsPerSecond(viewportWidth / CGFloat(duration))
+    }
+
+    private func clampedPixelsPerSecond(_ value: CGFloat) -> CGFloat {
+        min(max(value, minimumPixelsPerSecond), maximumPixelsPerSecond)
     }
 
     private var trackGutter: some View {
@@ -823,13 +926,14 @@ private struct RecordingEditorTimeline: View {
         }
     }
 
-    private func timelineRuler(width: CGFloat, duration: Double) -> some View {
-        let majorTicks = rulerTicks(for: duration)
-        let majorInterval = tickInterval(for: duration)
+    private func timelineRuler(width: CGFloat, duration: Double, pixelsPerSecond: CGFloat) -> some View {
+        let majorTicks = rulerTicks(for: duration, pixelsPerSecond: pixelsPerSecond)
+        let majorInterval = tickInterval(for: duration, pixelsPerSecond: pixelsPerSecond)
 
         return ZStack(alignment: .bottomLeading) {
             Rectangle()
                 .fill(Color.primary.opacity(0.025))
+                .contentShape(Rectangle())
 
             ForEach(minorTicks(for: duration, majorInterval: majorInterval), id: \.self) { tick in
                 let x = width * CGFloat(tick / duration)
@@ -842,7 +946,7 @@ private struct RecordingEditorTimeline: View {
             ForEach(majorTicks, id: \.self) { tick in
                 let x = width * CGFloat(tick / duration)
                 VStack(spacing: 4) {
-                    Text(timeString(tick))
+                    Text(timeString(tick, showsFractions: majorInterval < 1))
                         .font(.caption2.monospacedDigit())
                         .foregroundStyle(.secondary)
                         .fixedSize()
@@ -859,7 +963,7 @@ private struct RecordingEditorTimeline: View {
         }
     }
 
-    private func timelineTrack(width: CGFloat, duration: Double) -> some View {
+    private func timelineTrack(width: CGFloat, duration: Double, pixelsPerSecond: CGFloat) -> some View {
         ZStack(alignment: .topLeading) {
             Rectangle()
                 .fill(Color.primary.opacity(0.035))
@@ -874,15 +978,9 @@ private struct RecordingEditorTimeline: View {
                         .frame(height: 1)
                 }
                 .contentShape(Rectangle())
-                .gesture(
-                    DragGesture(minimumDistance: 0)
-                        .onEnded { value in
-                            let fraction = min(max(value.location.x / max(width, 1), 0), 1)
-                            session.seek(to: Double(fraction) * duration, selectingCut: true)
-                        }
-                )
+                .gesture(timelineScrubGesture(width: width, duration: duration))
 
-            ForEach(rulerTicks(for: duration), id: \.self) { tick in
+            ForEach(rulerTicks(for: duration, pixelsPerSecond: pixelsPerSecond), id: \.self) { tick in
                 let x = width * CGFloat(tick / duration)
                 Rectangle()
                     .fill(Color.secondary.opacity(0.08))
@@ -902,6 +1000,7 @@ private struct RecordingEditorTimeline: View {
                     duration: duration,
                     trackWidth: width,
                     onSelect: {
+                        isPlayheadSelected = false
                         session.selectCut(cut.id, seek: true)
                     },
                     onTrimStart: { nextStart in
@@ -920,14 +1019,30 @@ private struct RecordingEditorTimeline: View {
         }
     }
 
-    private func playhead(height: CGFloat) -> some View {
-        VStack(spacing: 0) {
-            Image(systemName: "triangle.fill")
-                .font(.system(size: 8, weight: .bold))
-                .foregroundStyle(Color.red)
-                .rotationEffect(Angle(degrees: 180))
-                .frame(width: 12, height: 10)
-                .shadow(color: Color.black.opacity(0.20), radius: 3, y: 1)
+    private func playhead(height: CGFloat, contentWidth: CGFloat, duration: Double) -> some View {
+        let isActive = isPlayheadSelected || playheadDragBaseTime != nil
+
+        return VStack(spacing: 0) {
+            ZStack {
+                if isActive {
+                    RoundedRectangle(cornerRadius: 5, style: .continuous)
+                        .fill(Color.accentColor.opacity(0.20))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 5, style: .continuous)
+                                .strokeBorder(Color.accentColor.opacity(0.55), lineWidth: 1)
+                        }
+                        .frame(width: 20, height: 16)
+                }
+
+                Image(systemName: "triangle.fill")
+                    .font(.system(size: 8, weight: .bold))
+                    .foregroundStyle(Color.red)
+                    .rotationEffect(Angle(degrees: 180))
+                    .frame(width: 12, height: 10)
+                    .shadow(color: Color.black.opacity(0.20), radius: 3, y: 1)
+            }
+            .frame(width: 24, height: 16)
+
             Rectangle()
                 .fill(
                     LinearGradient(
@@ -936,21 +1051,75 @@ private struct RecordingEditorTimeline: View {
                         endPoint: .bottom
                     )
                 )
-                .frame(width: 2, height: height - 10)
+                .frame(width: isActive ? 2.5 : 2, height: max(height - 16, 0))
         }
-        .offset(x: -6)
-        .allowsHitTesting(false)
+        .frame(width: 24, height: height, alignment: .top)
+        .contentShape(Rectangle())
+        .gesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { value in
+                    if playheadDragBaseTime == nil {
+                        playheadDragBaseTime = session.playheadTime
+                        isPlayheadSelected = true
+                        session.pause()
+                    }
+
+                    let baseTime = playheadDragBaseTime ?? session.playheadTime
+                    let deltaSeconds = Double(value.translation.width / max(contentWidth, 1)) * duration
+                    session.seek(to: baseTime + deltaSeconds, selectingCut: true)
+                }
+                .onEnded { _ in
+                    playheadDragBaseTime = nil
+                    isPlayheadSelected = true
+                }
+        )
+        .help(t("Drag Playhead"))
         .accessibilityLabel(t("Playhead"))
+        .accessibilityValue(timeString(session.playheadTime))
     }
 
-    private func tickInterval(for duration: Double) -> Double {
-        let target = duration / 7
-        let candidates: [Double] = [1, 2, 5, 10, 15, 30, 60, 120, 300, 600]
-        return candidates.first { $0 >= target } ?? 600
+    private func playheadScrollAnchor(x: CGFloat, width: CGFloat) -> some View {
+        let clampedX = min(max(x, 0), max(width - 1, 0))
+
+        return HStack(spacing: 0) {
+            Color.clear
+                .frame(width: clampedX)
+            Color.clear
+                .frame(width: 1, height: 1)
+                .id(playheadAnchorID)
+            Spacer(minLength: 0)
+        }
+        .frame(width: width, height: 1, alignment: .leading)
+        .allowsHitTesting(false)
     }
 
-    private func rulerTicks(for duration: Double) -> [Double] {
-        let interval = tickInterval(for: duration)
+    private func timelineScrubGesture(width: CGFloat, duration: Double) -> some Gesture {
+        DragGesture(minimumDistance: 0)
+            .onChanged { value in
+                seekFromTimelineLocation(value.location.x, width: width, duration: duration)
+            }
+            .onEnded { value in
+                seekFromTimelineLocation(value.location.x, width: width, duration: duration)
+            }
+    }
+
+    private func seekFromTimelineLocation(_ x: CGFloat, width: CGFloat, duration: Double) {
+        let fraction = min(max(x / max(width, 1), 0), 1)
+        isPlayheadSelected = true
+        session.seek(to: Double(fraction) * duration, selectingCut: true)
+    }
+
+    private func tickInterval(for duration: Double, pixelsPerSecond: CGFloat) -> Double {
+        let targetSeconds = max(0.05, Double(86 / max(pixelsPerSecond, 1)))
+        let candidates: [Double] = [0.1, 0.25, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600]
+        if duration <= candidates[0] {
+            return candidates[0]
+        }
+        return candidates.first { $0 >= targetSeconds } ?? 600
+    }
+
+    private func rulerTicks(for duration: Double, pixelsPerSecond: CGFloat) -> [Double] {
+        let interval = tickInterval(for: duration, pixelsPerSecond: pixelsPerSecond)
         let tickCount = max(Int(ceil(duration / interval)), 1)
         return (0...tickCount).map { index in
             min(Double(index) * interval, duration)
@@ -958,7 +1127,8 @@ private struct RecordingEditorTimeline: View {
     }
 
     private func minorTicks(for duration: Double, majorInterval: Double) -> [Double] {
-        let minorInterval = max(majorInterval / 5, 0.1)
+        let divisions = majorInterval <= 0.5 ? 2.0 : 5.0
+        let minorInterval = max(majorInterval / divisions, 0.05)
         let tickCount = max(Int(ceil(duration / minorInterval)), 1)
         return (0...tickCount)
             .map { min(Double($0) * minorInterval, duration) }
@@ -968,8 +1138,14 @@ private struct RecordingEditorTimeline: View {
             }
     }
 
-    private func timeString(_ seconds: Double) -> String {
+    private func timeString(_ seconds: Double, showsFractions: Bool = false) -> String {
         let safeSeconds = max(0, seconds)
+        if showsFractions && safeSeconds < 3600 {
+            let minutes = Int(safeSeconds) / 60
+            let secondsValue = safeSeconds.truncatingRemainder(dividingBy: 60)
+            return String(format: "%02d:%04.1f", minutes, secondsValue)
+        }
+
         let hours = Int(safeSeconds) / 3600
         let minutes = (Int(safeSeconds) / 60) % 60
         let wholeSeconds = Int(safeSeconds) % 60
