@@ -33,34 +33,23 @@ private enum AIScriptGenerationStatus {
         }
     }
 
-    var backgroundColor: Color {
+    var usesProminentButtonStyle: Bool {
         switch self {
         case .idle:
-            return Color(nsColor: .controlBackgroundColor)
+            return false
+        case .processing, .completed:
+            return true
+        }
+    }
+
+    var tintColor: Color {
+        switch self {
+        case .idle:
+            return .accentColor
         case .processing:
             return .purple
         case .completed:
             return .green
-        }
-    }
-
-    var foregroundColor: Color {
-        switch self {
-        case .idle:
-            return .primary
-        case .processing, .completed:
-            return .white
-        }
-    }
-
-    var borderColor: Color {
-        switch self {
-        case .idle:
-            return Color(nsColor: .separatorColor).opacity(0.55)
-        case .processing:
-            return .purple.opacity(0.75)
-        case .completed:
-            return .green.opacity(0.75)
         }
     }
 }
@@ -329,6 +318,51 @@ struct ContentView: View {
         }
     }
 
+    @ViewBuilder
+    private func aiScriptButton(isDisabled: Bool) -> some View {
+        if aiScriptStatus.usesProminentButtonStyle {
+            Button {
+                guard !isDisabled else { return }
+                showAIScriptComposer = true
+            } label: {
+                aiScriptButtonLabel
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+            .tint(aiScriptStatus.tintColor)
+            .disabled(isDisabled && !isAIScriptProcessing)
+            .help(isAIScriptProcessing ? t("AI Breath Cuts is processing") : t("Add natural teleprompter line breaks"))
+        } else {
+            Button {
+                guard !isDisabled else { return }
+                showAIScriptComposer = true
+            } label: {
+                aiScriptButtonLabel
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .disabled(isDisabled)
+            .help(t("Add natural teleprompter line breaks"))
+        }
+    }
+
+    private var aiScriptButtonLabel: some View {
+        Label {
+            Text(aiScriptStatus.title)
+                .lineLimit(1)
+                .minimumScaleFactor(0.88)
+        } icon: {
+            if isAIScriptProcessing {
+                ProgressView()
+                    .controlSize(.small)
+            } else {
+                Image(systemName: aiScriptStatus.symbolName)
+            }
+        }
+        .font(.system(size: 12, weight: .medium))
+        .frame(minWidth: 126)
+    }
+
     private var pageTitleHeader: some View {
         let index = service.currentPageIndex
         let isAIButtonDisabled = isAIScriptProcessing || !currentPageHasContent || isRunning || isDictating || recordingController.isRecording || recordingController.isPreviewing
@@ -360,36 +394,7 @@ struct ContentView: View {
 
             Spacer(minLength: 0)
 
-            Button {
-                showAIScriptComposer = true
-            } label: {
-                HStack(spacing: 7) {
-                    if isAIScriptProcessing {
-                        ProgressView()
-                            .controlSize(.small)
-                            .tint(aiScriptStatus.foregroundColor)
-                    } else {
-                        Image(systemName: aiScriptStatus.symbolName)
-                    }
-                    Text(aiScriptStatus.title)
-                }
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(aiScriptStatus.foregroundColor)
-                .lineLimit(1)
-                .padding(.horizontal, 11)
-                .frame(minWidth: 128, minHeight: 26)
-                .background(aiScriptStatus.backgroundColor, in: Capsule())
-                .overlay(
-                    Capsule()
-                        .stroke(aiScriptStatus.borderColor, lineWidth: 1)
-                )
-                .contentShape(Capsule())
-            }
-            .buttonStyle(.plain)
-            .controlSize(.small)
-            .opacity(isAIButtonDisabled && !isAIScriptProcessing ? 0.45 : 1)
-            .disabled(isAIButtonDisabled)
-            .help(isAIScriptProcessing ? t("AI Breath Cuts is processing") : t("Add natural teleprompter line breaks"))
+            aiScriptButton(isDisabled: isAIButtonDisabled)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 20)
