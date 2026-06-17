@@ -13,6 +13,7 @@ final class RecordingEditorWindow: NSObject, NSWindowDelegate {
         capturedOutput: CapturedRecordingOutput,
         onDelete: @escaping () -> Void,
         onExport: @escaping (RecordingEditDecision) -> Void,
+        onExportCameraOnly: @escaping (CapturedRecordingOutput) -> Void,
         onClose: @escaping () -> Void
     ) {
         if let window {
@@ -33,6 +34,10 @@ final class RecordingEditorWindow: NSObject, NSWindowDelegate {
             onExport: { [weak self] decision in
                 self?.hide()
                 onExport(decision)
+            },
+            onExportCameraOnly: { [weak self] capturedOutput in
+                self?.hide()
+                onExportCameraOnly(capturedOutput)
             }
         )
 
@@ -443,6 +448,7 @@ private struct RecordingEditorView: View {
 
     let onDelete: () -> Void
     let onExport: (RecordingEditDecision) -> Void
+    let onExportCameraOnly: (CapturedRecordingOutput) -> Void
 
     @State private var timelineHeight: CGFloat = 260
     @State private var timelineResizeStartHeight: CGFloat?
@@ -522,6 +528,17 @@ private struct RecordingEditorView: View {
             .controlSize(.small)
             .keyboardShortcut(.defaultAction)
             .disabled(controller.isExporting)
+
+            Button {
+                session.pause()
+                onExportCameraOnly(session.capturedOutput)
+            } label: {
+                Label(t("Transparent Camera"), systemImage: "person.crop.rectangle")
+            }
+            .controlSize(.small)
+            .disabled(!session.capturedOutput.canRenderCameraOnly || controller.isExporting)
+            .help(t("Render camera only with transparent background"))
+            .accessibilityLabel(t("Render camera only with transparent background"))
         }
     }
 

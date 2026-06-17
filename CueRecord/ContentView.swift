@@ -1511,6 +1511,10 @@ struct ContentView: View {
                     isShowingPostRecordingOptions = false
                     recordingController.renderCapturedRecording(capturedOutput, editDecision: decision)
                 },
+                onExportCameraOnly: { _ in
+                    isShowingPostRecordingOptions = false
+                    recordingController.renderPendingCapturedRecording(mode: .cameraOnlyTransparent)
+                },
                 onClose: {
                     isShowingPostRecordingOptions = false
                 }
@@ -1544,6 +1548,10 @@ struct ContentView: View {
                 onExport: { decision in
                     isShowingPostRecordingOptions = false
                     recordingController.renderPendingCapturedRecording(editDecision: decision)
+                },
+                onExportCameraOnly: { output in
+                    isShowingPostRecordingOptions = false
+                    recordingController.renderCapturedRecording(output, mode: .cameraOnlyTransparent)
                 },
                 onClose: {
                     isShowingPostRecordingOptions = false

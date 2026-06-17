@@ -336,6 +336,7 @@ final class InterfaceLanguageSettings: ObservableObject {
         "Delete recording": "删除录制",
         "Camera Only": "仅摄像头",
         "Transparent": "透明",
+        "Transparent Camera": "透明摄像头",
         "Render camera only with transparent background": "渲染透明背景的仅摄像头视频",
         "Render All": "全部渲染",
         "Render full recording": "渲染完整录制",
