@@ -494,21 +494,6 @@ private struct RecordingEditorView: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                Button {
-                    session.seekToSelectedCutStart()
-                } label: {
-                    Label(t("Restart Playback"), systemImage: "backward.end.fill")
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-
-                Button {
-                    session.togglePlayback()
-                } label: {
-                    Label(session.isPlaying ? t("Pause") : t("Play"), systemImage: session.isPlaying ? "pause.fill" : "play.fill")
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
             }
             .padding(.horizontal, 20)
             .padding(.top, 18)
@@ -703,37 +688,52 @@ private struct RecordingEditorTimeline: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 10) {
-                ControlGroup {
-                    Button {
-                        session.addCut()
-                    } label: {
-                        Label(t("Add Cut"), systemImage: "scissors")
-                    }
-                    .labelStyle(.iconOnly)
-                    .help(t("Add Cut at Playhead"))
-                    .accessibilityLabel(t("Add Cut"))
-
-                    Button {
-                        session.mergeSelectedCut()
-                    } label: {
-                        Label(t("Merge Cut"), systemImage: "link")
-                    }
-                    .labelStyle(.iconOnly)
-                    .disabled(!session.canMergeSelectedCut)
-                    .help(t("Merge Cut"))
-                    .accessibilityLabel(t("Merge Cut"))
+            ZStack {
+                HStack(spacing: 10) {
+                    Label(t("Main Timeline"), systemImage: "film.stack")
+                        .font(.system(size: 12, weight: .semibold))
+                    Spacer()
+                    timelineZoomControls
                 }
-                .controlSize(.small)
 
-                Label(t("Main Timeline"), systemImage: "film.stack")
-                    .font(.system(size: 12, weight: .semibold))
-                Text("\(timeString(session.playheadTime)) / \(timeString(session.duration))")
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
-                Spacer()
+                HStack(spacing: 8) {
+                    Text("\(timeString(session.playheadTime)) / \(timeString(session.duration))")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .frame(minWidth: 94)
 
-                timelineZoomControls
+                    ControlGroup {
+                        Button {
+                            session.togglePlayback()
+                        } label: {
+                            Label(session.isPlaying ? t("Pause") : t("Play"), systemImage: session.isPlaying ? "pause.fill" : "play.fill")
+                        }
+                        .labelStyle(.iconOnly)
+                        .keyboardShortcut(.space, modifiers: [])
+                        .help(session.isPlaying ? t("Pause") : t("Play"))
+                        .accessibilityLabel(session.isPlaying ? t("Pause") : t("Play"))
+
+                        Button {
+                            session.addCut()
+                        } label: {
+                            Label(t("Add Cut"), systemImage: "scissors")
+                        }
+                        .labelStyle(.iconOnly)
+                        .help(t("Add Cut at Playhead"))
+                        .accessibilityLabel(t("Add Cut"))
+
+                        Button {
+                            session.mergeSelectedCut()
+                        } label: {
+                            Label(t("Merge Cut"), systemImage: "link")
+                        }
+                        .labelStyle(.iconOnly)
+                        .disabled(!session.canMergeSelectedCut)
+                        .help(t("Merge Cut"))
+                        .accessibilityLabel(t("Merge Cut"))
+                    }
+                    .controlSize(.small)
+                }
             }
             .padding(.horizontal, horizontalPadding)
             .frame(height: 40)
@@ -783,6 +783,11 @@ private struct RecordingEditorTimeline: View {
                     .overlay {
                         RoundedRectangle(cornerRadius: 8, style: .continuous)
                             .strokeBorder(Color.secondary.opacity(0.12), lineWidth: 1)
+                    }
+                    .background {
+                        RecordingTimelineWheelZoomView { delta in
+                            zoomFromScroll(delta)
+                        }
                     }
                     .padding(.horizontal, horizontalPadding)
 
@@ -840,7 +845,7 @@ private struct RecordingEditorTimeline: View {
                 Text(t("Zoom"))
             }
             .controlSize(.small)
-            .frame(width: 92)
+            .frame(width: 132)
             .help(t("Zoom"))
         }
     }
@@ -863,6 +868,11 @@ private struct RecordingEditorTimeline: View {
 
     private func zoomOut() {
         pixelsPerSecond = clampedPixelsPerSecond(pixelsPerSecond / 1.24)
+    }
+
+    private func zoomFromScroll(_ delta: CGFloat) {
+        let factor = exp(delta * 0.0032)
+        pixelsPerSecond = clampedPixelsPerSecond(pixelsPerSecond * factor)
     }
 
     private func zoomToFit() {
@@ -1284,6 +1294,70 @@ private struct RecordingTimelineCutSegment: View {
         let minutes = Int(safeSeconds) / 60
         let wholeSeconds = Int(safeSeconds) % 60
         return String(format: "%02d:%02d", minutes, wholeSeconds)
+    }
+}
+
+private struct RecordingTimelineWheelZoomView: NSViewRepresentable {
+    let onScroll: (CGFloat) -> Void
+
+    func makeNSView(context: Context) -> RecordingTimelineWheelZoomHostView {
+        let view = RecordingTimelineWheelZoomHostView()
+        view.onScroll = onScroll
+        return view
+    }
+
+    func updateNSView(_ nsView: RecordingTimelineWheelZoomHostView, context: Context) {
+        nsView.onScroll = onScroll
+    }
+}
+
+private final class RecordingTimelineWheelZoomHostView: NSView {
+    var onScroll: ((CGFloat) -> Void)?
+    private var eventMonitor: Any?
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        resetEventMonitor()
+    }
+
+    deinit {
+        removeEventMonitor()
+    }
+
+    private func resetEventMonitor() {
+        removeEventMonitor()
+        guard window != nil else { return }
+
+        eventMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
+            guard let self,
+                  let window = self.window,
+                  event.window === window
+            else {
+                return event
+            }
+
+            let location = self.convert(event.locationInWindow, from: nil)
+            guard self.bounds.contains(location) else {
+                return event
+            }
+
+            let dominantDelta = abs(event.scrollingDeltaY) >= abs(event.scrollingDeltaX)
+                ? event.scrollingDeltaY
+                : event.scrollingDeltaX
+            guard dominantDelta != 0 else {
+                return event
+            }
+
+            self.onScroll?(dominantDelta)
+            return nil
+        }
+    }
+
+    private func removeEventMonitor() {
+        if let eventMonitor {
+            NSEvent.removeMonitor(eventMonitor)
+            self.eventMonitor = nil
+        }
     }
 }
 
