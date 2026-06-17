@@ -471,10 +471,6 @@ private struct RecordingEditorView: View {
 
             RecordingEditorTimeline(session: session)
                 .frame(height: timelineHeight)
-
-            Divider()
-
-            footer
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(nsColor: .windowBackgroundColor))
@@ -494,6 +490,8 @@ private struct RecordingEditorView: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
+
+                topRightActions
             }
             .padding(.horizontal, 20)
             .padding(.top, 18)
@@ -502,6 +500,30 @@ private struct RecordingEditorView: View {
             RecordingEditorPreviewCanvas(session: session)
                 .padding(.horizontal, 20)
                 .padding(.bottom, 20)
+        }
+    }
+
+    private var topRightActions: some View {
+        HStack(spacing: 8) {
+            Button(role: .destructive) {
+                session.pause()
+                onDelete()
+            } label: {
+                Label(t("Delete Recording"), systemImage: "trash")
+            }
+            .controlSize(.small)
+            .disabled(controller.isExporting)
+
+            Button {
+                session.pause()
+                onExport(session.exportDecision)
+            } label: {
+                Label(t("Export"), systemImage: "square.and.arrow.up")
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+            .keyboardShortcut(.defaultAction)
+            .disabled(controller.isExporting)
         }
     }
 
@@ -605,33 +627,6 @@ private struct RecordingEditorView: View {
             )
             .help(t("Resize Timeline"))
             .background(Color(nsColor: .windowBackgroundColor))
-    }
-
-    private var footer: some View {
-        HStack {
-            Button(role: .destructive) {
-                session.pause()
-                onDelete()
-            } label: {
-                Label(t("Delete Recording"), systemImage: "trash")
-            }
-            .disabled(controller.isExporting)
-
-            Spacer()
-
-            Button {
-                session.pause()
-                onExport(session.exportDecision)
-            } label: {
-                Label(t("Export"), systemImage: "square.and.arrow.up")
-            }
-            .buttonStyle(.borderedProminent)
-            .keyboardShortcut(.defaultAction)
-            .disabled(controller.isExporting)
-        }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 14)
-        .background(.bar)
     }
 
     private var layoutModeBinding: Binding<RecordingEditLayoutMode> {
