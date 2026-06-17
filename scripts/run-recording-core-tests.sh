@@ -10,6 +10,7 @@ xcrun swiftc \
   "$ROOT/CueRecord/Storage/CueRecordProjectStore.swift" \
   "$ROOT/CueRecord/Storage/CueRecordVaultRepairer.swift" \
   "$ROOT/CueRecord/Teleprompter/CueTextTokenizer.swift" \
+  "$ROOT/CueRecord/Teleprompter/SpeechTrackingMatcher.swift" \
   "$ROOT/CueRecord/Recording/Models/RecordingEditDecision.swift" \
   "$ROOT/CueRecord/Recording/Models/RecordingState.swift" \
   "$ROOT/CueRecord/Recording/Core/Recording/ResolvedRecordingTarget.swift" \

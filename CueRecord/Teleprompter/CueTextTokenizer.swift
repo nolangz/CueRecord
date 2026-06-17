@@ -6,10 +6,10 @@
 import Foundation
 
 enum TeleprompterLineBreak {
-    static let markerToken = "\u{2028}"
-    static let newlineToken = "\u{2029}"
-    static let token = markerToken
-    static let markers: Set<Character> = ["|", "｜"]
+    nonisolated static let markerToken = "\u{2028}"
+    nonisolated static let newlineToken = "\u{2029}"
+    nonisolated static let token = markerToken
+    nonisolated static let markers: Set<Character> = ["|", "｜"]
 
     nonisolated static func isBreakToken(_ word: String) -> Bool {
         word == markerToken || word == newlineToken
@@ -21,11 +21,11 @@ enum TeleprompterLineBreak {
 }
 
 enum TeleprompterPaceCue {
-    static let fastToken = "\u{E000}"
-    static let slowToken = "\u{E001}"
+    nonisolated static let fastToken = "\u{E000}"
+    nonisolated static let slowToken = "\u{E001}"
 
-    private static let fastMarkers = ["››"]
-    private static let slowMarkers = ["--(慢)", "--（慢）", "--"]
+    private nonisolated static let fastMarkers = ["››"]
+    private nonisolated static let slowMarkers = ["--(慢)", "--（慢）", "--"]
 
     nonisolated static func isCueToken(_ word: String) -> Bool {
         word == fastToken || word == slowToken
@@ -55,7 +55,7 @@ enum TeleprompterPaceCue {
 }
 
 extension Unicode.Scalar {
-    var isCJK: Bool {
+    nonisolated var isCJK: Bool {
         let value = value
         return (value >= 0x4E00 && value <= 0x9FFF)
             || (value >= 0x3400 && value <= 0x4DBF)
@@ -69,7 +69,7 @@ extension Unicode.Scalar {
 
 /// Splits text into display-ready words. CJK characters are split individually
 /// and explicit cue breaks become internal line-break tokens.
-func splitTextIntoWords(_ text: String) -> [String] {
+nonisolated func splitTextIntoWords(_ text: String) -> [String] {
     var result: [String] = []
     var buffer = ""
 

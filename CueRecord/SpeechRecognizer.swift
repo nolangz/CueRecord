@@ -333,6 +333,15 @@ class SpeechRecognizer {
             && best >= recoveryResult
             && forwardDelta <= 1200
 
+        let immediateThreeWordAnchor = recoveryMatch.matchedWordCount >= 3
+            && best >= recoveryResult
+
+        if immediateThreeWordAnchor {
+            recognizedCharCount = candidate
+            recentMatchPositions = [candidate]
+            return
+        }
+
         if confirmed || shortStep || anchoredPartial || strongSequentialMatch || strongRecoveryAnchor {
             recognizedCharCount = candidate
         }
@@ -340,6 +349,7 @@ class SpeechRecognizer {
 
     private func bestRecoveryAnchorMatch(spoken: String) -> RecoveryAnchorResult {
         [
+            immediateThreeWordAnchorMatch(spoken: spoken),
             recoveryAnchorMatch(spoken: spoken),
             windowedAnchorMatch(spoken: spoken),
             normalizedPhraseAnchorMatch(spoken: spoken)
@@ -355,6 +365,24 @@ class SpeechRecognizer {
         }
 
         return next.endOffset > current.endOffset ? next : current
+    }
+
+    private func immediateThreeWordAnchorMatch(spoken: String) -> RecoveryAnchorResult {
+        let remainingSource = String(sourceText.dropFirst(matchStartOffset))
+        guard let match = SpeechTrackingMatcher.immediateThreeWordAnchor(in: remainingSource, spoken: spoken) else {
+            return .none
+        }
+
+        return RecoveryAnchorResult(
+            endOffset: match.endOffset,
+            score: match.score,
+            matchedWordCount: match.matchedWordCount,
+            matchedSignalCount: match.matchedSignalCount,
+            exactMatchCount: match.exactMatchCount,
+            sourceStart: match.sourceStart,
+            spokenStart: match.spokenStart,
+            isPhraseMatch: false
+        )
     }
 
     private func selectBestMatch(charResult: Int, wordResult: Int, recoveryResult: Int, spokenSignalCount: Int) -> Int {

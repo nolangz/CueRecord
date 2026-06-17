@@ -460,6 +460,42 @@ func testTeleprompterLegacySlowCueTokenization() throws {
     try expect(!words.contains("--(慢)"), "Legacy slow cue marker should not be displayed as a word")
 }
 
+func testSpeechTrackingThreeWordAnchorCrossesLineBreaks() throws {
+    let words = splitTextIntoWords("alpha beta\ngamma\ndelta epsilon")
+    let sourceText = words.joined(separator: " ")
+    let match = SpeechTrackingMatcher.immediateThreeWordAnchor(in: sourceText, spoken: "beta gamma delta")
+
+    guard let match else {
+        throw TestFailure.failed("Three consecutive spoken words should anchor across line breaks")
+    }
+
+    guard let deltaRange = sourceText.range(of: "delta") else {
+        throw TestFailure.failed("Fixture should contain delta")
+    }
+
+    let expectedEndOffset = sourceText.distance(from: sourceText.startIndex, to: deltaRange.upperBound)
+    try expect(match.matchedWordCount == 3, "Anchor should require and report three matched words")
+    try expect(match.endOffset == expectedEndOffset, "Anchor should advance through the third matched word")
+}
+
+func testSpeechTrackingThreeCJKAnchorCrossesBreakTokens() throws {
+    let words = splitTextIntoWords("甲|乙\n丙丁")
+    let sourceText = words.joined(separator: " ")
+    let match = SpeechTrackingMatcher.immediateThreeWordAnchor(in: sourceText, spoken: "甲乙丙")
+
+    guard let match else {
+        throw TestFailure.failed("Three consecutive CJK tokens should anchor across break tokens")
+    }
+
+    guard let thirdRange = sourceText.range(of: "丙") else {
+        throw TestFailure.failed("Fixture should contain the third CJK token")
+    }
+
+    let expectedEndOffset = sourceText.distance(from: sourceText.startIndex, to: thirdRange.upperBound)
+    try expect(match.matchedWordCount == 3, "CJK anchor should report three matched tokens")
+    try expect(match.endOffset == expectedEndOffset, "CJK anchor should preserve source offsets across breaks")
+}
+
 let tests: [(String, () throws -> Void)] = [
     ("AudioStartGate", testAudioStartGate),
     ("BoundedDropOldestBuffer", testBoundedDropOldestBuffer),
@@ -475,7 +511,9 @@ let tests: [(String, () throws -> Void)] = [
     ("TeleprompterLineBreakTokenization", testTeleprompterLineBreakTokenization),
     ("TeleprompterLineBreakDeduplication", testTeleprompterLineBreakDeduplication),
     ("TeleprompterPaceCueTokenization", testTeleprompterPaceCueTokenization),
-    ("TeleprompterLegacySlowCueTokenization", testTeleprompterLegacySlowCueTokenization)
+    ("TeleprompterLegacySlowCueTokenization", testTeleprompterLegacySlowCueTokenization),
+    ("SpeechTrackingThreeWordAnchorCrossesLineBreaks", testSpeechTrackingThreeWordAnchorCrossesLineBreaks),
+    ("SpeechTrackingThreeCJKAnchorCrossesBreakTokens", testSpeechTrackingThreeCJKAnchorCrossesBreakTokens)
 ]
 
 do {
