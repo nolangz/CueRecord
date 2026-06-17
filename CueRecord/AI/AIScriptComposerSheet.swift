@@ -5,7 +5,7 @@ struct AIScriptComposerSheet: View {
 
     let sourceTitle: String
     let sourceMarkdown: String
-    let onGenerated: (String, String) -> Void
+    let onSubmit: (AIBreathCutSubmission) -> Void
 
     @State private var selectedModel: AIScriptModel = .deepSeekV4Flash
     @State private var breathMarkerMode: AIBreathMarkerMode = .marked
@@ -13,11 +13,9 @@ struct AIScriptComposerSheet: View {
     @State private var apiKey = ""
     @State private var isEditingAPIKey = false
     @State private var shouldSaveAPIKey = true
-    @State private var isGenerating = false
     @State private var errorMessage: String?
 
     private let keyStore = DeepSeekAPIKeyStore.shared
-    private let client = DeepSeekChatClient()
 
     private var hasSavedAPIKey: Bool {
         keyStore.hasAPIKey
@@ -28,8 +26,7 @@ struct AIScriptComposerSheet: View {
     }
 
     private var canGenerate: Bool {
-        !isGenerating
-            && !sourceMarkdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        !sourceMarkdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && (!requiresAPIKeyInput || !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
     }
 
@@ -228,19 +225,9 @@ struct AIScriptComposerSheet: View {
             Spacer()
 
             Button {
-                Task {
-                    await generate()
-                }
+                submit()
             } label: {
-                if isGenerating {
-                    HStack(spacing: 8) {
-                        ProgressView()
-                            .controlSize(.small)
-                        Text("Generating")
-                    }
-                } else {
-                    Label("Create Draft", systemImage: "sparkles")
-                }
+                Label("Create Draft", systemImage: "sparkles")
             }
             .buttonStyle(.borderedProminent)
             .keyboardShortcut(.defaultAction)
@@ -250,10 +237,9 @@ struct AIScriptComposerSheet: View {
     }
 
     @MainActor
-    private func generate() async {
+    private func submit() {
         guard canGenerate else { return }
         errorMessage = nil
-        isGenerating = true
 
         do {
             let resolvedAPIKey: String
@@ -277,14 +263,15 @@ struct AIScriptComposerSheet: View {
                 model: selectedModel,
                 markerMode: breathMarkerMode
             )
-            let script = try await client.generateBreathCuts(request: request, apiKey: resolvedAPIKey)
-            onGenerated(script, generatedTitle)
+            onSubmit(AIBreathCutSubmission(
+                request: request,
+                apiKey: resolvedAPIKey,
+                generatedTitle: generatedTitle
+            ))
             dismiss()
         } catch {
             errorMessage = error.localizedDescription
         }
-
-        isGenerating = false
     }
 
     private var generatedTitle: String {

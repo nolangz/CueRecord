@@ -81,6 +81,12 @@ struct AIBreathCutRequest {
     var markerMode: AIBreathMarkerMode
 }
 
+struct AIBreathCutSubmission {
+    var request: AIBreathCutRequest
+    var apiKey: String
+    var generatedTitle: String
+}
+
 enum AIScriptError: LocalizedError {
     case invalidAPIKey
     case emptySource

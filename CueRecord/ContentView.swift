@@ -24,6 +24,8 @@ struct ContentView: View {
     @State private var settingsInitialTab: SettingsTab = .appearance
     @State private var showAbout = false
     @State private var showAIScriptComposer = false
+    @State private var isAIScriptProcessing = false
+    @State private var aiScriptTask: Task<Void, Never>?
     @State private var setupCompleted = AppSetupPreferences.initialSetupCompleted
     @State private var recordingPreviewBarWindow = RecordingPreviewBarWindow()
     @State private var hidesMainUIForRecordingPreview = false
@@ -207,6 +209,39 @@ struct ContentView: View {
         isDictating = false
     }
 
+    private func startAIScriptGeneration(_ submission: AIBreathCutSubmission) {
+        guard !isAIScriptProcessing else { return }
+
+        isAIScriptProcessing = true
+        aiScriptTask?.cancel()
+        aiScriptTask = Task {
+            do {
+                let generatedMarkdown = try await DeepSeekChatClient().generateBreathCuts(
+                    request: submission.request,
+                    apiKey: submission.apiKey
+                )
+
+                await MainActor.run {
+                    _ = service.addPage(text: generatedMarkdown, title: submission.generatedTitle)
+                    isAIScriptProcessing = false
+                    aiScriptTask = nil
+                }
+            } catch is CancellationError {
+                await MainActor.run {
+                    isAIScriptProcessing = false
+                    aiScriptTask = nil
+                }
+            } catch {
+                await MainActor.run {
+                    dropAlertTitle = "AI Breath Cuts Failed"
+                    dropError = error.localizedDescription
+                    isAIScriptProcessing = false
+                    aiScriptTask = nil
+                }
+            }
+        }
+    }
+
     private var pageTitleHeader: some View {
         let index = service.currentPageIndex
 
@@ -240,13 +275,23 @@ struct ContentView: View {
             Button {
                 showAIScriptComposer = true
             } label: {
-                Label("AI Breath Cuts", systemImage: "sparkles")
+                if isAIScriptProcessing {
+                    HStack(spacing: 7) {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text("Processing")
+                    }
                     .font(.system(size: 12, weight: .semibold))
+                } else {
+                    Label("AI Breath Cuts", systemImage: "sparkles")
+                        .font(.system(size: 12, weight: .semibold))
+                }
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
-            .disabled(!currentPageHasContent || isRunning || isDictating || recordingController.isRecording || recordingController.isPreviewing)
-            .help("Add natural teleprompter line breaks")
+            .frame(minWidth: 128)
+            .disabled(isAIScriptProcessing || !currentPageHasContent || isRunning || isDictating || recordingController.isRecording || recordingController.isPreviewing)
+            .help(isAIScriptProcessing ? "AI Breath Cuts is processing" : "Add natural teleprompter line breaks")
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 20)
@@ -565,8 +610,8 @@ struct ContentView: View {
             AIScriptComposerSheet(
                 sourceTitle: service.pageTitle(at: service.currentPageIndex),
                 sourceMarkdown: service.currentPageText
-            ) { generatedMarkdown, generatedTitle in
-                _ = service.addPage(text: generatedMarkdown, title: generatedTitle)
+            ) { submission in
+                startAIScriptGeneration(submission)
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .openSettings)) { _ in
