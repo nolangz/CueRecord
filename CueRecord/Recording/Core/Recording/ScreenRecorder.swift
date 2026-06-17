@@ -114,7 +114,7 @@ class ScreenRecorder: NSObject, ObservableObject {
     private var cameraWriter: AVAssetWriter?
     private var cameraWriterInput: AVAssetWriterInput?
     private var cameraPixelBufferAdapter: AVAssetWriterInputPixelBufferAdaptor?
-    private var cameraRecordingTask: Task<Void, Never>?
+    private var isCameraTrackRecording = false
     private var cameraOutputURL: URL?
     private var overlayMetadataURL: URL?
     private var cameraOutputDimensions: (width: Int, height: Int)?
@@ -290,11 +290,9 @@ class ScreenRecorder: NSObject, ObservableObject {
         }
         stream = nil
 
-        if cameraRecordingTask != nil {
-            let task = cameraRecordingTask
-            cameraRecordingTask = nil
-            task?.cancel()
-            await task?.value
+        if isCameraTrackRecording {
+            isCameraTrackRecording = false
+            cameraManager.setRecordingFrameHandler(nil)
         }
 
         cameraManager.stopCapture()
@@ -856,7 +854,7 @@ class ScreenRecorder: NSObject, ObservableObject {
 
     // MARK: - 独立摄像头视频轨
     private func startCameraTrackRecording() {
-        guard cameraRecordingTask == nil, let outputURL else { return }
+        guard !isCameraTrackRecording, let outputURL else { return }
 
         cameraOutputURL = Self.siblingOutputURL(for: outputURL, suffix: "camera", extension: "mov")
         overlayMetadataURL = Self.siblingOutputURL(for: outputURL, suffix: "overlay", extension: "json")
@@ -874,21 +872,12 @@ class ScreenRecorder: NSObject, ObservableObject {
             try? FileManager.default.removeItem(at: overlayMetadataURL)
         }
 
-        cameraRecordingTask = Task { @MainActor [weak self] in
-            await self?.recordCameraFrames()
+        isCameraTrackRecording = true
+        cameraManager.setRecordingFrameHandler { [weak self] frame in
+            self?.appendCameraFrame(frame)
         }
 
         print("📷 独立摄像头视频轨开始: \(cameraOutputURL?.lastPathComponent ?? "")")
-    }
-
-    private func recordCameraFrames() async {
-        while !Task.isCancelled {
-            if let frame = cameraManager.dequeueLatestFrame() {
-                appendCameraFrame(frame)
-            }
-
-            try? await Task.sleep(nanoseconds: 33_333_333)
-        }
     }
 
     private func appendCameraFrame(_ frame: CameraFrameSample) {
@@ -909,7 +898,8 @@ class ScreenRecorder: NSObject, ObservableObject {
             }
         } catch {
             print("❌ 摄像头视频写入器创建失败: \(error.localizedDescription)")
-            cameraRecordingTask?.cancel()
+            isCameraTrackRecording = false
+            cameraManager.setRecordingFrameHandler(nil)
             return
         }
 
@@ -1046,10 +1036,8 @@ class ScreenRecorder: NSObject, ObservableObject {
     }
 
     private func stopCameraTrackRecording() async {
-        let task = cameraRecordingTask
-        cameraRecordingTask = nil
-        task?.cancel()
-        await task?.value
+        isCameraTrackRecording = false
+        cameraManager.setRecordingFrameHandler(nil)
 
         captureOverlayMetadataSample(at: lastCameraElapsedTime)
 

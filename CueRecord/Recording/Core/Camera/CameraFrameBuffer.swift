@@ -33,7 +33,8 @@ final class CameraFrameBuffer {
         return CGFloat(width) / CGFloat(height)
     }
 
-    func push(pixelBuffer: CVPixelBuffer, timestamp: CMTime) {
+    @discardableResult
+    func push(pixelBuffer: CVPixelBuffer, timestamp: CMTime, enqueue: Bool = true) -> CameraFrameSample {
         receivedCount += 1
         let fallbackTimestamp = CMTime(value: CMTimeValue(receivedCount), timescale: 30)
         let frame = CameraFrameSample(
@@ -42,7 +43,10 @@ final class CameraFrameBuffer {
             sequence: receivedCount
         )
         latestFrame = frame
-        queue.append(frame)
+        if enqueue {
+            queue.append(frame)
+        }
+        return frame
     }
 
     func dequeueLatest() -> CameraFrameSample? {

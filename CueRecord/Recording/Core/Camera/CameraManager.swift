@@ -26,6 +26,7 @@ class CameraManager: NSObject, ObservableObject {
     private let ciContext = CIContext()
     private var deviceObservers: [NSObjectProtocol] = []
     private var refreshWorkItem: DispatchWorkItem?
+    private var recordingFrameHandler: ((CameraFrameSample) -> Void)?
     private static let firstFrameTimeout: TimeInterval = 4.0
     
     override init() {
@@ -236,6 +237,10 @@ class CameraManager: NSObject, ObservableObject {
         frameBuffer.dequeueLatest()
     }
 
+    func setRecordingFrameHandler(_ handler: ((CameraFrameSample) -> Void)?) {
+        recordingFrameHandler = handler
+    }
+
     var receivedFrameCount: UInt64 {
         frameBuffer.receivedCount
     }
@@ -442,7 +447,13 @@ extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
         
         // 更新当前帧
         Task { @MainActor in
-            frameBuffer.push(pixelBuffer: pixelBuffer, timestamp: timestamp)
+            let hasRecordingConsumer = recordingFrameHandler != nil
+            let frame = frameBuffer.push(
+                pixelBuffer: pixelBuffer,
+                timestamp: timestamp,
+                enqueue: !hasRecordingConsumer
+            )
+            recordingFrameHandler?(frame)
         }
     }
 }
