@@ -44,9 +44,7 @@ struct AudioInputDevice: Identifiable, Hashable {
                 mScope: kAudioObjectPropertyScopeGlobal,
                 mElement: kAudioObjectPropertyElementMain
             )
-            var uid: CFString = "" as CFString
-            var uidSize = UInt32(MemoryLayout<CFString>.size)
-            guard AudioObjectGetPropertyData(deviceID, &uidAddress, 0, nil, &uidSize, &uid) == noErr else { continue }
+            guard let uid = stringProperty(deviceID: deviceID, address: &uidAddress) else { continue }
 
             // Get name
             var nameAddress = AudioObjectPropertyAddress(
@@ -54,13 +52,27 @@ struct AudioInputDevice: Identifiable, Hashable {
                 mScope: kAudioObjectPropertyScopeGlobal,
                 mElement: kAudioObjectPropertyElementMain
             )
-            var name: CFString = "" as CFString
-            var nameSize = UInt32(MemoryLayout<CFString>.size)
-            guard AudioObjectGetPropertyData(deviceID, &nameAddress, 0, nil, &nameSize, &name) == noErr else { continue }
+            guard let name = stringProperty(deviceID: deviceID, address: &nameAddress) else { continue }
 
-            result.append(AudioInputDevice(id: deviceID, uid: uid as String, name: name as String))
+            result.append(AudioInputDevice(id: deviceID, uid: uid, name: name))
         }
         return result
+    }
+
+    private static func stringProperty(deviceID: AudioDeviceID, address: inout AudioObjectPropertyAddress) -> String? {
+        var dataSize: UInt32 = 0
+        guard AudioObjectGetPropertyDataSize(deviceID, &address, 0, nil, &dataSize) == noErr else {
+            return nil
+        }
+
+        var value: Unmanaged<CFString>?
+        guard AudioObjectGetPropertyData(deviceID, &address, 0, nil, &dataSize, &value) == noErr,
+              let stringValue = value?.takeRetainedValue()
+        else {
+            return nil
+        }
+
+        return stringValue as String
     }
 
     static func deviceID(forUID uid: String) -> AudioDeviceID? {
@@ -337,9 +349,12 @@ class SpeechRecognizer {
             && best >= recoveryResult
 
         if immediateThreeWordAnchor {
-            recognizedCharCount = candidate
-            recentMatchPositions = [candidate]
-            return
+            let anchorCandidate = min(matchStartOffset + recoveryResult, sourceText.count)
+            if anchorCandidate > recognizedCharCount {
+                recognizedCharCount = anchorCandidate
+                recentMatchPositions = [anchorCandidate]
+                return
+            }
         }
 
         if confirmed || shortStep || anchoredPartial || strongSequentialMatch || strongRecoveryAnchor {

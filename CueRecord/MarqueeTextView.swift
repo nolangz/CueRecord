@@ -712,40 +712,75 @@ struct ScrollWheelView: NSViewRepresentable {
     }
 }
 
-class ScrollWheelNSView: NSView {
+final class ScrollWheelNSView: NSView {
     var onScroll: ((CGFloat) -> Void)?
     var onScrollEnd: (() -> Void)?
     private var scrollMonitor: Any?
+    private var isHandlingScroll = false
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        if window != nil && scrollMonitor == nil {
-            scrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
-                guard let self, let window = self.window else { return event }
-                // Only handle if event is in our window
-                if event.window == window {
-                    let delta = event.scrollingDeltaY
-                    let scaled = event.hasPreciseScrollingDeltas ? delta : delta * 10
-                    self.onScroll?(scaled)
+        resetScrollMonitor()
+    }
 
-                    if event.phase == .ended || event.momentumPhase == .ended {
-                        self.onScrollEnd?()
-                    }
-                }
-                return event
-            }
-        }
+    deinit {
+        removeScrollMonitor()
     }
 
     override func removeFromSuperview() {
-        if let monitor = scrollMonitor {
-            NSEvent.removeMonitor(monitor)
-            scrollMonitor = nil
-        }
+        removeScrollMonitor()
         super.removeFromSuperview()
     }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
         return nil
+    }
+
+    private func resetScrollMonitor() {
+        removeScrollMonitor()
+        guard window != nil else { return }
+
+        scrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
+            guard let self,
+                  let window = self.window,
+                  event.window === window
+            else {
+                return event
+            }
+
+            let location = self.convert(event.locationInWindow, from: nil)
+            let isInside = self.bounds.contains(location)
+            let isEnding = event.phase == .ended || event.momentumPhase == .ended
+
+            guard isInside || (self.isHandlingScroll && isEnding) else {
+                return event
+            }
+
+            if isInside {
+                self.isHandlingScroll = true
+                let delta = event.scrollingDeltaY
+                let scaled = event.hasPreciseScrollingDeltas ? delta : delta * 10
+                if scaled != 0 {
+                    self.onScroll?(scaled)
+                }
+            }
+
+            if isEnding {
+                if self.isHandlingScroll {
+                    self.onScrollEnd?()
+                }
+                self.isHandlingScroll = false
+            }
+
+            return event
+        }
+    }
+
+    private func removeScrollMonitor() {
+        if let scrollMonitor {
+            NSEvent.removeMonitor(scrollMonitor)
+            self.scrollMonitor = nil
+        }
+        isHandlingScroll = false
     }
 }
