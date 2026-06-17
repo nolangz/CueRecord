@@ -76,11 +76,11 @@ class UpdateChecker {
 
     private func showUpdateAvailable(latestVersion: String, releaseURL: String) {
         let alert = NSAlert()
-        alert.messageText = "Update Available"
-        alert.informativeText = "CueRecord \(latestVersion) is available. You are currently running \(currentVersion)."
+        alert.messageText = uiText("Update Available")
+        alert.informativeText = InterfaceLanguageSettings.shared.format("CueRecord %@ is available. You are currently running %@.", latestVersion, currentVersion)
         alert.alertStyle = .informational
-        alert.addButton(withTitle: "Download")
-        alert.addButton(withTitle: "Later")
+        alert.addButton(withTitle: uiText("Download"))
+        alert.addButton(withTitle: uiText("Later"))
 
         if alert.runModal() == .alertFirstButtonReturn {
             if let url = URL(string: releaseURL) {
@@ -91,19 +91,19 @@ class UpdateChecker {
 
     private func showUpToDate() {
         let alert = NSAlert()
-        alert.messageText = "You're Up to Date"
-        alert.informativeText = "CueRecord \(currentVersion) is the latest version."
+        alert.messageText = uiText("You're Up to Date")
+        alert.informativeText = InterfaceLanguageSettings.shared.format("CueRecord %@ is the latest version.", currentVersion)
         alert.alertStyle = .informational
-        alert.addButton(withTitle: "OK")
+        alert.addButton(withTitle: uiText("OK"))
         alert.runModal()
     }
 
     private func showError(_ message: String) {
         let alert = NSAlert()
-        alert.messageText = "Update Check Failed"
+        alert.messageText = uiText("Update Check Failed")
         alert.informativeText = message
         alert.alertStyle = .warning
-        alert.addButton(withTitle: "OK")
+        alert.addButton(withTitle: uiText("OK"))
         alert.runModal()
     }
 }

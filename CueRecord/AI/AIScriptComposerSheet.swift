@@ -2,6 +2,7 @@ import SwiftUI
 
 struct AIScriptComposerSheet: View {
     @Environment(\.dismiss) private var dismiss
+    @ObservedObject private var interfaceLanguage = InterfaceLanguageSettings.shared
 
     let sourceTitle: String
     let sourceMarkdown: String
@@ -28,6 +29,10 @@ struct AIScriptComposerSheet: View {
     private var canGenerate: Bool {
         !sourceMarkdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && (!requiresAPIKeyInput || !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+    }
+
+    private func t(_ english: String) -> String {
+        interfaceLanguage.text(english)
     }
 
     var body: some View {
@@ -73,9 +78,9 @@ struct AIScriptComposerSheet: View {
                 .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
 
             VStack(alignment: .leading, spacing: 3) {
-                Text("AI Breath Cuts")
+                Text(t("AI Breath Cuts"))
                     .font(.system(size: 18, weight: .semibold))
-                Text("Add natural teleprompter line breaks to \"\(sourceTitle)\"")
+                Text(interfaceLanguage.format("Add natural teleprompter line breaks to \"%@\"", sourceTitle))
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -84,13 +89,13 @@ struct AIScriptComposerSheet: View {
             Spacer()
 
             VStack(alignment: .trailing, spacing: 5) {
-                Text("Breath Marks")
+                Text(t("Breath Marks"))
                     .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(.secondary)
 
-                Picker("Breath Marks", selection: $breathMarkerMode) {
+                Picker(t("Breath Marks"), selection: $breathMarkerMode) {
                     ForEach(AIBreathMarkerMode.allCases) { mode in
-                        Text(mode.label).tag(mode)
+                        Text(mode.localizedLabel).tag(mode)
                     }
                 }
                 .pickerStyle(.segmented)
@@ -103,18 +108,18 @@ struct AIScriptComposerSheet: View {
 
     private var modelSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Model")
+            Text(t("Model"))
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(.secondary)
 
-            Picker("Model", selection: $selectedModel) {
+            Picker(t("Model"), selection: $selectedModel) {
                 ForEach(AIScriptModel.allCases) { model in
                     Text(model.displayName).tag(model)
                 }
             }
             .pickerStyle(.segmented)
 
-            Text(selectedModel.shortDescription)
+            Text(selectedModel.localizedShortDescription)
                 .font(.system(size: 11))
                 .foregroundStyle(.tertiary)
         }
@@ -122,7 +127,7 @@ struct AIScriptComposerSheet: View {
 
     private var outputSection: some View {
         VStack(alignment: .leading, spacing: 7) {
-            Text("Output")
+            Text(t("Output"))
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(.secondary)
 
@@ -131,7 +136,7 @@ struct AIScriptComposerSheet: View {
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(Color.accentColor)
 
-                Text("Create new markdown")
+                Text(t("Create new markdown"))
                     .font(.system(size: 13, weight: .medium))
 
                 Spacer()
@@ -149,7 +154,7 @@ struct AIScriptComposerSheet: View {
 
     private var promptSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Notes")
+            Text(t("Notes"))
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(.secondary)
 
@@ -161,7 +166,7 @@ struct AIScriptComposerSheet: View {
                 .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                 .overlay(alignment: .topLeading) {
                     if customPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        Text("Optional instructions, e.g. shorter lines, preserve paragraph shape, or cut more aggressively.")
+                        Text(t("Optional instructions, e.g. shorter lines, preserve paragraph shape, or cut more aggressively."))
                             .font(.system(size: 12))
                             .foregroundStyle(.tertiary)
                             .padding(.horizontal, 14)
@@ -175,14 +180,14 @@ struct AIScriptComposerSheet: View {
     private var apiKeySection: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text("DeepSeek API Key")
+                Text(t("DeepSeek API Key"))
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(.secondary)
 
                 Spacer()
 
                 if hasSavedAPIKey {
-                    Button(isEditingAPIKey ? "Use Saved Key" : "Replace Key") {
+                    Button(isEditingAPIKey ? t("Use Saved Key") : t("Replace Key")) {
                         isEditingAPIKey.toggle()
                         if !isEditingAPIKey {
                             apiKey = ""
@@ -197,13 +202,13 @@ struct AIScriptComposerSheet: View {
                 SecureField("sk-...", text: $apiKey)
                     .textFieldStyle(.roundedBorder)
 
-                Toggle("Save key in Keychain", isOn: $shouldSaveAPIKey)
+                Toggle(t("Save key in Keychain"), isOn: $shouldSaveAPIKey)
                     .font(.system(size: 12))
             } else {
                 HStack(spacing: 8) {
                     Image(systemName: "checkmark.seal.fill")
                         .foregroundStyle(.green)
-                    Text("Saved key in Keychain")
+                    Text(t("Saved key in Keychain"))
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
                     Spacer()
@@ -217,7 +222,7 @@ struct AIScriptComposerSheet: View {
 
     private var footer: some View {
         HStack {
-            Button("Cancel") {
+            Button(t("Cancel")) {
                 dismiss()
             }
             .keyboardShortcut(.cancelAction)
@@ -227,7 +232,7 @@ struct AIScriptComposerSheet: View {
             Button {
                 submit()
             } label: {
-                Label("Create Draft", systemImage: "sparkles")
+                Label(t("Create Draft"), systemImage: "sparkles")
             }
             .buttonStyle(.borderedProminent)
             .keyboardShortcut(.defaultAction)
@@ -276,7 +281,7 @@ struct AIScriptComposerSheet: View {
 
     private var generatedTitle: String {
         let trimmedSourceTitle = sourceTitle.trimmingCharacters(in: .whitespacesAndNewlines)
-        let base = trimmedSourceTitle.isEmpty ? "Untitled" : trimmedSourceTitle
-        return "AI Breath Cuts - \(base)"
+        let base = trimmedSourceTitle.isEmpty ? t("Untitled") : trimmedSourceTitle
+        return "\(t("AI Breath Cuts")) - \(base)"
     }
 }

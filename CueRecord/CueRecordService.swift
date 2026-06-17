@@ -615,7 +615,7 @@ class CueRecordService: NSObject, ObservableObject {
             loadProject(at: currentProjectIndex)
         } catch {
             let alert = NSAlert()
-            alert.messageText = "Failed to open CueRecord workspace"
+            alert.messageText = uiText("Failed to open CueRecord workspace")
             alert.informativeText = error.localizedDescription
             alert.runModal()
         }
@@ -641,7 +641,7 @@ class CueRecordService: NSObject, ObservableObject {
             NSDocumentController.shared.noteNewRecentDocumentURL(url)
         } catch {
             let alert = NSAlert()
-            alert.messageText = "Failed to save file"
+            alert.messageText = uiText("Failed to save file")
             alert.informativeText = error.localizedDescription
             alert.runModal()
         }
@@ -665,7 +665,7 @@ class CueRecordService: NSObject, ObservableObject {
             } catch {
                 DispatchQueue.main.async {
                     let alert = NSAlert()
-                    alert.messageText = "Import Error"
+                    alert.messageText = uiText("Import Error")
                     alert.informativeText = error.localizedDescription
                     alert.runModal()
                 }
@@ -724,7 +724,7 @@ class CueRecordService: NSObject, ObservableObject {
             NSDocumentController.shared.noteNewRecentDocumentURL(url)
         } catch {
             let alert = NSAlert()
-            alert.messageText = "Failed to open file"
+            alert.messageText = uiText("Failed to open file")
             alert.informativeText = error.localizedDescription
             alert.runModal()
         }
@@ -1301,7 +1301,7 @@ class CueRecordService: NSObject, ObservableObject {
 
     private func showFileError(title: String, error: Error) {
         let alert = NSAlert()
-        alert.messageText = title
+        alert.messageText = uiText(title)
         alert.informativeText = error.localizedDescription
         alert.runModal()
     }

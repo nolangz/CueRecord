@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct RecordingSettingsView: View {
+    @ObservedObject private var interfaceLanguage = InterfaceLanguageSettings.shared
     @ObservedObject private var controller: RecordingController
     @ObservedObject private var recordingState: RecordingState
     @ObservedObject private var permissionsManager: PermissionsManager
@@ -19,6 +20,10 @@ struct RecordingSettingsView: View {
         self.permissionsManager = controller.permissionsManager
         self.audioManager = controller.audioManager
         self.cameraManager = controller.cameraManager
+    }
+
+    private func t(_ english: String) -> String {
+        interfaceLanguage.text(english)
     }
 
     var body: some View {
@@ -50,7 +55,7 @@ struct RecordingSettingsView: View {
 
                 cameraSettings
 
-                Text("Each recording is saved in the current project folder.")
+                Text(t("Each recording is saved in the current project folder."))
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
             }
@@ -89,19 +94,19 @@ struct RecordingSettingsView: View {
     private var permissionsSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text("Permissions")
+                Text(t("Permissions"))
                     .font(.system(size: 13, weight: .semibold))
                 Spacer()
-                Button("Grant") {
+                Button(t("Grant")) {
                     controller.requestPermissions()
                 }
                 .controlSize(.small)
             }
 
             HStack(spacing: 8) {
-                permissionBadge("Screen", granted: permissionsManager.screenRecordingAuthorized)
-                permissionBadge("Mic", granted: permissionsManager.microphoneAuthorized)
-                permissionBadge("Camera", granted: permissionsManager.cameraAuthorized)
+                permissionBadge(t("Screen"), granted: permissionsManager.screenRecordingAuthorized)
+                permissionBadge(t("Mic"), granted: permissionsManager.microphoneAuthorized)
+                permissionBadge(t("Camera"), granted: permissionsManager.cameraAuthorized)
             }
         }
     }
@@ -109,7 +114,7 @@ struct RecordingSettingsView: View {
     private var recordingControls: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text(recordingState.isRecording ? timeString(from: recordingState.recordingDuration) : "Ready")
+                Text(recordingState.isRecording ? timeString(from: recordingState.recordingDuration) : t("Ready"))
                     .font(.system(size: 13, weight: .semibold, design: .monospaced))
                     .foregroundStyle(recordingState.isRecording ? .red : .secondary)
                 Spacer()
@@ -119,9 +124,9 @@ struct RecordingSettingsView: View {
                 }
             }
 
-            settingPicker("Mode", selection: $recordingState.captureMode) {
+            settingPicker(t("Mode"), selection: $recordingState.captureMode) {
                 ForEach(RecordingCaptureMode.allCases, id: \.self) { mode in
-                    Text(mode.displayName).tag(mode)
+                    Text(mode.localizedDisplayName).tag(mode)
                 }
             }
             .disabled(recordingState.isRecording || controller.isStarting)
@@ -130,15 +135,15 @@ struct RecordingSettingsView: View {
 
     private var captureSettings: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Audio")
+            Text(t("Audio"))
                 .font(.system(size: 13, weight: .semibold))
 
-            Toggle("Microphone", isOn: $recordingState.microphoneEnabled)
+            Toggle(t("Microphone"), isOn: $recordingState.microphoneEnabled)
                 .toggleStyle(.checkbox)
 
             if recordingState.microphoneEnabled {
                 HStack(spacing: 8) {
-                    Text("Input")
+                    Text(t("Input"))
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
                         .frame(width: 54, alignment: .leading)
@@ -163,14 +168,14 @@ struct RecordingSettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
-            Toggle("System Audio", isOn: $recordingState.systemAudioEnabled)
+            Toggle(t("System Audio"), isOn: $recordingState.systemAudioEnabled)
                 .toggleStyle(.checkbox)
         }
     }
 
     private var areaSettings: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Area Ratio")
+            Text(t("Area Ratio"))
                 .font(.system(size: 13, weight: .semibold))
 
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3), spacing: 8) {
@@ -179,9 +184,9 @@ struct RecordingSettingsView: View {
                         recordingState.areaAspectRatioPreset = preset
                     } label: {
                         VStack(spacing: 2) {
-                            Text(preset.title)
+                            Text(preset.localizedTitle)
                                 .font(.system(size: 13, weight: .semibold))
-                            Text(preset.subtitle)
+                            Text(preset.localizedSubtitle)
                                 .font(.system(size: 10))
                                 .foregroundStyle(recordingState.areaAspectRatioPreset == preset ? .white.opacity(0.75) : .secondary)
                         }
@@ -207,19 +212,19 @@ struct RecordingSettingsView: View {
 
     private var cameraSettings: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Toggle("Camera Overlay", isOn: $recordingState.cameraOverlayEnabled)
+            Toggle(t("Camera Overlay"), isOn: $recordingState.cameraOverlayEnabled)
                 .toggleStyle(.checkbox)
 
             if recordingState.cameraOverlayEnabled {
                 HStack(spacing: 8) {
-                    Text("Camera")
+                    Text(t("Camera"))
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
                         .frame(width: 54, alignment: .leading)
 
                     Picker("", selection: $cameraManager.selectedCameraID) {
                         if cameraManager.availableCameras.isEmpty {
-                            Text("No Camera").tag("")
+                            Text(t("No Camera")).tag("")
                         } else {
                             ForEach(cameraManager.availableCameras) { camera in
                                 Text(camera.name).tag(camera.id)
@@ -231,21 +236,21 @@ struct RecordingSettingsView: View {
                     .disabled(cameraManager.availableCameras.isEmpty || recordingState.isRecording)
                 }
 
-                settingPicker("Shape", selection: $recordingState.cameraOverlayShape) {
+                settingPicker(t("Shape"), selection: $recordingState.cameraOverlayShape) {
                     ForEach(CameraOverlayShape.allCases, id: \.self) { shape in
-                        Text(shape.displayName).tag(shape)
+                        Text(shape.localizedDisplayName).tag(shape)
                     }
                 }
 
-                settingPicker("Position", selection: $recordingState.cameraOverlayPosition) {
+                settingPicker(t("Position"), selection: $recordingState.cameraOverlayPosition) {
                     ForEach(CameraOverlayPosition.allCases, id: \.self) { position in
-                        Text(position.displayName).tag(position)
+                        Text(position.localizedDisplayName).tag(position)
                     }
                 }
 
-                settingPicker("Size", selection: $recordingState.cameraOverlaySize) {
+                settingPicker(t("Size"), selection: $recordingState.cameraOverlaySize) {
                     ForEach(CameraOverlaySize.allCases, id: \.self) { size in
-                        Text(size.displayName).tag(size)
+                        Text(size.localizedDisplayName).tag(size)
                     }
                 }
             }

@@ -16,11 +16,11 @@ private enum AIScriptGenerationStatus {
     var title: String {
         switch self {
         case .idle:
-            return "AI Breath Cuts"
+            return uiText("AI Breath Cuts")
         case .processing:
-            return "Processing"
+            return uiText("Processing")
         case .completed:
-            return "Completed"
+            return uiText("Completed")
         }
     }
 
@@ -68,6 +68,7 @@ private enum AIScriptGenerationStatus {
 struct ContentView: View {
     @ObservedObject private var service = CueRecordService.shared
     @ObservedObject private var recordingController = RecordingController.shared
+    @ObservedObject private var interfaceLanguage = InterfaceLanguageSettings.shared
     @State private var isRunning = false
     @State private var isDictating = false
     @State private var dictation = DictationManager()
@@ -120,6 +121,10 @@ struct ContentView: View {
         aiScriptStatus == .processing
     }
 
+    private func t(_ english: String) -> String {
+        interfaceLanguage.text(english)
+    }
+
     private var shouldShowVaultPicker: Bool {
         service.vaultURL == nil && !service.launchedExternally
     }
@@ -156,7 +161,7 @@ struct ContentView: View {
 
     private var exportProgressBar: some View {
         VStack(alignment: .leading, spacing: 5) {
-            Text(recordingController.exportStatusText ?? "Finishing recording")
+            Text(recordingController.exportStatusText ?? t("Finishing recording"))
                 .font(.system(size: 10, weight: .medium))
                 .foregroundStyle(.secondary)
 
@@ -383,7 +388,7 @@ struct ContentView: View {
             .controlSize(.small)
             .opacity(isAIButtonDisabled && !isAIScriptProcessing ? 0.45 : 1)
             .disabled(isAIButtonDisabled)
-            .help(isAIScriptProcessing ? "AI Breath Cuts is processing" : "Add natural teleprompter line breaks")
+            .help(isAIScriptProcessing ? t("AI Breath Cuts is processing") : t("Add natural teleprompter line breaks"))
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 20)
@@ -503,10 +508,10 @@ struct ContentView: View {
                     Image(systemName: "doc.text")
                         .font(.system(size: 28, weight: .light))
                         .foregroundStyle(Color.accentColor)
-                    Text("Drop PowerPoint (.pptx) file")
+                    Text(t("Drop PowerPoint (.pptx) file"))
                         .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(.primary)
-                    Text("For Keynote or Google Slides,\nexport as PPTX first.")
+                    Text(t("For Keynote or Google Slides,\nexport as PPTX first."))
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
@@ -558,11 +563,11 @@ struct ContentView: View {
             Spacer()
 
             VStack(spacing: 8) {
-                Text("Choose a CueRecord Workspace")
+                Text(t("Choose a CueRecord Workspace"))
                     .font(.system(size: 28, weight: .bold))
                     .foregroundStyle(.primary)
 
-                Text("Projects, scripts, and recordings are saved here.")
+                Text(t("Projects, scripts, and recordings are saved here."))
                     .font(.system(size: 13))
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -572,7 +577,7 @@ struct ContentView: View {
             Button {
                 service.chooseVaultFolder()
             } label: {
-                Label("Choose Folder", systemImage: "folder")
+                Label(t("Choose Folder"), systemImage: "folder")
                     .font(.system(size: 13, weight: .semibold))
                     .padding(.horizontal, 16)
                     .padding(.vertical, 9)
@@ -593,10 +598,10 @@ struct ContentView: View {
                 .font(.system(size: 40, weight: .light))
                 .foregroundStyle(.secondary)
 
-            Text("Director Mode")
+            Text(t("Director Mode"))
                 .font(.system(size: 22, weight: .bold))
 
-            Text(service.directorIsReading ? "Reading from director…" : "Waiting for director to send script…")
+            Text(service.directorIsReading ? t("Reading from director…") : t("Waiting for director to send script…"))
                 .font(.system(size: 13))
                 .foregroundStyle(.secondary)
 
@@ -635,7 +640,7 @@ struct ContentView: View {
             Button {
                 showSettings = true
             } label: {
-                Text("Open Settings")
+                Text(t("Open Settings"))
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(.secondary)
             }
@@ -689,10 +694,10 @@ struct ContentView: View {
                 }
             }
         }
-        .alert(dropAlertTitle, isPresented: Binding(get: { dropError != nil }, set: { if !$0 { dropError = nil } })) {
-            Button("OK") { dropError = nil }
+        .alert(t(dropAlertTitle), isPresented: Binding(get: { dropError != nil }, set: { if !$0 { dropError = nil } })) {
+            Button(t("OK")) { dropError = nil }
         } message: {
-            Text(dropError ?? "")
+            Text(dropError.map(t) ?? "")
         }
         .frame(minWidth: shouldShowSetupWizard ? 620 : 700, minHeight: shouldShowSetupWizard ? 430 : 400)
         .background(.ultraThinMaterial)
@@ -761,7 +766,7 @@ struct ContentView: View {
 
     private func pagePreview(_ page: String) -> String {
         let trimmed = page.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty { return "Empty" }
+        if trimmed.isEmpty { return t("Empty") }
         let words = trimmed.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }
         let preview = words.prefix(5).joined(separator: " ")
         return preview.count > 30 ? String(preview.prefix(30)) + "…" : preview
@@ -805,7 +810,7 @@ struct ContentView: View {
                         }
                     }
                 } label: {
-                    Label("New Project", systemImage: "plus")
+                    Label(t("New Project"), systemImage: "plus")
                         .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
@@ -815,6 +820,19 @@ struct ContentView: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+
+                Button {
+                    interfaceLanguage.toggle()
+                } label: {
+                    Text(interfaceLanguage.language.toggleTitle)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 32, height: 32)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(t("Switch Language"))
+                .help(t("Switch interface language"))
 
                 Button {
                     settingsInitialTab = .appearance
@@ -827,7 +845,7 @@ struct ContentView: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Settings")
+                .accessibilityLabel(t("Settings"))
                 .disabled(isRunning || recordingController.isStarting || recordingController.isRecording || recordingController.isPreviewing)
                 .opacity(isRunning || recordingController.isStarting || recordingController.isRecording || recordingController.isPreviewing ? 0.4 : 1)
                 .padding(.trailing, 12)
@@ -858,8 +876,8 @@ struct ContentView: View {
             }
             .buttonStyle(.plain)
             .foregroundStyle(.secondary)
-            .accessibilityLabel("Select Folder as Vault")
-            .help("Select Folder as Vault")
+            .accessibilityLabel(t("Select Folder as Vault"))
+            .help(t("Select Folder as Vault"))
 
             Button {
                 openVaultInFinder()
@@ -877,8 +895,8 @@ struct ContentView: View {
             }
             .buttonStyle(.plain)
             .foregroundStyle(.secondary)
-            .accessibilityLabel("Show Vault in Finder")
-            .help("Open Vault in Finder")
+            .accessibilityLabel(t("Show Vault in Finder"))
+            .help(t("Open Vault in Finder"))
             .disabled(service.vaultURL == nil)
             .opacity(service.vaultURL == nil ? 0.4 : 1)
         }
@@ -939,8 +957,8 @@ struct ContentView: View {
                 .foregroundStyle(.secondary)
                 .opacity(isHovered ? 1 : 0)
                 .allowsHitTesting(isHovered)
-                .accessibilityLabel("New Markdown")
-                .help("New Markdown")
+                .accessibilityLabel(t("New Markdown"))
+                .help(t("New Markdown"))
             }
             .padding(.horizontal, 8)
             .frame(height: 30)
@@ -974,13 +992,13 @@ struct ContentView: View {
         Button {
             openProjectInFinder(projectIndex)
         } label: {
-            Label("Show in Finder", systemImage: "folder")
+            Label(t("Show in Finder"), systemImage: "folder")
         }
 
         Button {
             beginRenamingProject(projectIndex: projectIndex)
         } label: {
-            Label("Rename Project", systemImage: "pencil")
+            Label(t("Rename Project"), systemImage: "pencil")
         }
 
         Divider()
@@ -988,13 +1006,13 @@ struct ContentView: View {
         Button(role: .destructive) {
             removeProject(at: projectIndex)
         } label: {
-            Label("Delete Project", systemImage: "trash")
+            Label(t("Delete Project"), systemImage: "trash")
         }
     }
 
     private func markdownRow(project: CueRecordProject, projectIndex: Int, markdownIndex: Int) -> some View {
         let isSelected = projectIndex == service.currentProjectIndex && markdownIndex == service.currentPageIndex
-        let title = markdownIndex < project.markdownTitles.count ? project.markdownTitles[markdownIndex] : "Untitled"
+        let title = markdownIndex < project.markdownTitles.count ? project.markdownTitles[markdownIndex] : t("Untitled")
         let date = markdownIndex < project.modifiedDates.count ? project.modifiedDates[markdownIndex] : nil
         let markdownURL = markdownIndex < project.markdownURLs.count ? project.markdownURLs[markdownIndex] : nil
         let isHovered = markdownURL != nil && hoveredMarkdownURL == markdownURL
@@ -1074,13 +1092,13 @@ struct ContentView: View {
         Button {
             openMarkdownInFinder(projectIndex: projectIndex, markdownIndex: markdownIndex)
         } label: {
-            Label("Show in Finder", systemImage: "folder")
+            Label(t("Show in Finder"), systemImage: "folder")
         }
 
         Button {
             beginRenamingMarkdown(projectIndex: projectIndex, markdownIndex: markdownIndex)
         } label: {
-            Label("Rename File", systemImage: "pencil")
+            Label(t("Rename File"), systemImage: "pencil")
         }
 
         if projectIndex == service.currentProjectIndex && service.pages.count > 1 {
@@ -1089,7 +1107,7 @@ struct ContentView: View {
             Button(role: .destructive) {
                 removePage(at: markdownIndex)
             } label: {
-                Label("Delete File", systemImage: "trash")
+                Label(t("Delete File"), systemImage: "trash")
             }
         }
     }
@@ -1453,9 +1471,14 @@ struct ContentView: View {
 
 struct AboutView: View {
     @Environment(\.dismiss) private var dismiss
+    @ObservedObject private var interfaceLanguage = InterfaceLanguageSettings.shared
 
     private var appVersion: String {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
+    }
+
+    private func t(_ english: String) -> String {
+        interfaceLanguage.text(english)
     }
 
     var body: some View {
@@ -1467,13 +1490,13 @@ struct AboutView: View {
             VStack(spacing: 4) {
                 Text("CueRecord")
                     .font(.system(size: 20, weight: .bold))
-                Text("Version \(appVersion)")
+                Text("\(t("Version")) \(appVersion)")
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
             }
 
             // Description
-            Text("A recording workspace for scripted screen videos.")
+            Text(t("A recording workspace for scripted screen videos."))
                 .font(.system(size: 13))
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -1482,7 +1505,7 @@ struct AboutView: View {
             Divider().padding(.horizontal, 20)
 
             VStack(spacing: 4) {
-                Text("Made by Nolan Lai")
+                Text(t("Made by Nolan Lai"))
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(.secondary)
                 Text("CueRecord")
@@ -1490,7 +1513,7 @@ struct AboutView: View {
                     .foregroundStyle(.tertiary)
             }
 
-            Button("OK") {
+            Button(t("OK")) {
                 dismiss()
             }
             .buttonStyle(.borderedProminent)

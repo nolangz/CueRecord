@@ -214,7 +214,7 @@ private final class WindowSelectionView: NSView {
     var windowProvider: ((CGPoint) -> WindowRecordingTarget?)?
     var onSelect: ((WindowRecordingTarget?) -> Void)?
 
-    private let cancelButton = NSButton(title: "Cancel", target: nil, action: nil)
+    private let cancelButton = NSButton(title: uiText("Cancel"), target: nil, action: nil)
     private var trackingArea: NSTrackingArea?
     private var hoveredWindow: WindowRecordingTarget? {
         didSet {
@@ -347,7 +347,7 @@ private final class WindowSelectionView: NSView {
     }
 
     private func drawInstruction() {
-        let text = "Click a window to record. Press ESC or right-click to cancel."
+        let text = uiText("Click a window to record. Press ESC or right-click to cancel.")
         let attributes: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: 16, weight: .semibold),
             .foregroundColor: NSColor.white

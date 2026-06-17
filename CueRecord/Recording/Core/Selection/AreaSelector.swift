@@ -193,8 +193,12 @@ class AreaSelectionView: NSView {
     }
     
     private func setupView() {
-        let ratioHint = aspectRatioPreset.aspectRatio == nil ? "Freeform" : aspectRatioPreset.title
-        let instructionLabel = NSTextField(labelWithString: "Drag to select recording area · \(ratioHint) · Release to use · Press ESC to cancel")
+        let ratioHint = aspectRatioPreset.aspectRatio == nil ? uiText("Free") : aspectRatioPreset.title
+        let instruction = InterfaceLanguageSettings.shared.format(
+            "Drag to select recording area · %@ · Release to use · Press ESC to cancel",
+            ratioHint
+        )
+        let instructionLabel = NSTextField(labelWithString: instruction)
         instructionLabel.textColor = .white
         instructionLabel.font = NSFont.systemFont(ofSize: 16)
         instructionLabel.backgroundColor = NSColor.black.withAlphaComponent(0.7)

@@ -20,9 +20,9 @@ private enum AppSetupStep: Int, CaseIterable {
     var title: String {
         switch self {
         case .permissions:
-            return "Permissions"
+            return uiText("Permissions")
         case .workspace:
-            return "Workspace"
+            return uiText("Workspace")
         }
     }
 }
@@ -35,11 +35,11 @@ private enum SetupPermissionPage: Int, CaseIterable {
     var title: String {
         switch self {
         case .microphone:
-            return "Microphone"
+            return uiText("Microphone")
         case .camera:
-            return "Camera"
+            return uiText("Camera")
         case .screen:
-            return "Screen"
+            return uiText("Screen")
         }
     }
 
@@ -56,6 +56,7 @@ private enum SetupPermissionPage: Int, CaseIterable {
 }
 
 struct AppSetupView: View {
+    @ObservedObject private var interfaceLanguage = InterfaceLanguageSettings.shared
     @ObservedObject var service: CueRecordService
     @ObservedObject var controller: RecordingController
     @ObservedObject var permissionsManager: PermissionsManager
@@ -69,6 +70,10 @@ struct AppSetupView: View {
     @State private var selectedVaultURL: URL?
     @State private var isCheckingPermissions = false
     @State private var isRequestingPermission = false
+
+    private func t(_ english: String) -> String {
+        interfaceLanguage.text(english)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -109,7 +114,7 @@ struct AppSetupView: View {
                 CueRecordLogoView(cornerRadius: 8)
                     .frame(width: 34, height: 34)
 
-                Text("Set Up CueRecord")
+                Text(t("Set Up CueRecord"))
                     .font(.title3)
                     .fontWeight(.semibold)
 
@@ -202,7 +207,7 @@ struct AppSetupView: View {
                         await refreshPermissions()
                     }
                 } label: {
-                    Label(isCheckingPermissions ? "Checking" : "Recheck", systemImage: "arrow.clockwise")
+                    Label(isCheckingPermissions ? t("Checking") : t("Recheck"), systemImage: "arrow.clockwise")
                         .frame(minWidth: 104)
                 }
                 .disabled(isCheckingPermissions || isRequestingPermission)
@@ -210,7 +215,7 @@ struct AppSetupView: View {
                 Button {
                     currentStep = .permissions
                 } label: {
-                    Label("Back", systemImage: "arrow.left")
+                    Label(t("Back"), systemImage: "arrow.left")
                         .frame(minWidth: 88)
                 }
             }
@@ -225,7 +230,7 @@ struct AppSetupView: View {
                         advancePermissionPage()
                     }
                 } label: {
-                    Label(permissionsManager.allPermissionsGranted ? "Choose Workspace" : "Next", systemImage: "arrow.right")
+                    Label(permissionsManager.allPermissionsGranted ? t("Choose Workspace") : t("Next"), systemImage: "arrow.right")
                         .frame(minWidth: permissionsManager.allPermissionsGranted ? 150 : 92)
                 }
                 .buttonStyle(.borderedProminent)
@@ -234,7 +239,7 @@ struct AppSetupView: View {
                 Button {
                     finishSetup()
                 } label: {
-                    Label("Finish Setup", systemImage: "checkmark")
+                    Label(t("Finish Setup"), systemImage: "checkmark")
                         .frame(minWidth: 118)
                 }
                 .buttonStyle(.borderedProminent)
@@ -291,8 +296,8 @@ struct AppSetupView: View {
 
     private func selectVault() {
         let panel = NSOpenPanel()
-        panel.title = "Choose CueRecord Workspace"
-        panel.prompt = "Choose"
+        panel.title = t("Choose CueRecord Workspace")
+        panel.prompt = t("Choose")
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
         panel.canCreateDirectories = true
@@ -421,7 +426,7 @@ private struct DirectorySetupRow: View {
                 .frame(width: 30, height: 30)
 
             VStack(alignment: .leading, spacing: 4) {
-                Text(selectedDirectory?.lastPathComponent ?? "Workspace")
+                Text(selectedDirectory?.lastPathComponent ?? uiText("Workspace"))
                     .font(.callout)
                     .fontWeight(.semibold)
                     .lineLimit(1)
@@ -435,7 +440,7 @@ private struct DirectorySetupRow: View {
 
             Spacer(minLength: 12)
 
-            Button("Choose") {
+            Button(uiText("Choose")) {
                 onSelect()
             }
             .frame(width: 82)

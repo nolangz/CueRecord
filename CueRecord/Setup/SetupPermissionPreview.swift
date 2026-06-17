@@ -15,8 +15,8 @@ struct ScreenPermissionPreview: View {
         HStack(spacing: 18) {
             PermissionStatusBlock(
                 systemImage: "rectangle.dashed",
-                title: "Screen and System Audio Recording",
-                status: permissionsManager.screenRecordingAuthorized ? "Granted" : "Not Granted",
+                title: uiText("Screen and System Audio Recording"),
+                status: permissionsManager.screenRecordingAuthorized ? uiText("Granted") : uiText("Not Granted"),
                 isGranted: permissionsManager.screenRecordingAuthorized
             )
 
@@ -27,7 +27,7 @@ struct ScreenPermissionPreview: View {
                     await request()
                 }
             } label: {
-                Text(isBusy ? "Working" : (permissionsManager.screenRecordingAuthorized ? "Recheck" : "Authorize"))
+                Text(isBusy ? uiText("Working") : (permissionsManager.screenRecordingAuthorized ? uiText("Recheck") : uiText("Authorize")))
                     .frame(width: 92)
             }
             .disabled(isBusy)
@@ -50,7 +50,7 @@ struct MicrophonePermissionPreview: View {
         HStack(spacing: 18) {
             PermissionStatusBlock(
                 systemImage: "mic.fill",
-                title: "Test Microphone",
+                title: uiText("Test Microphone"),
                 status: microphoneStatus,
                 isGranted: monitor.hasReceivedSample || permissionsManager.microphoneAuthorized,
                 detail: monitor.errorMessage
@@ -64,7 +64,7 @@ struct MicrophonePermissionPreview: View {
                         await activate(forceRestart: true)
                     }
                 } label: {
-                    Text(monitor.isStarting ? "Testing" : "Test Microphone")
+                    Text(monitor.isStarting ? uiText("Testing") : uiText("Test Microphone"))
                         .frame(width: 128)
                 }
                 .disabled(monitor.isStarting)
@@ -101,12 +101,12 @@ struct MicrophonePermissionPreview: View {
 
     private var microphoneStatus: String {
         if monitor.hasReceivedSample {
-            return "Input OK"
+            return uiText("Input OK")
         }
         if permissionsManager.microphoneAuthorized {
-            return "Granted"
+            return uiText("Granted")
         }
-        return "Not Granted"
+        return uiText("Not Granted")
     }
 }
 
@@ -120,7 +120,7 @@ struct CameraPermissionPreview: View {
             VStack(alignment: .leading, spacing: 12) {
                 PermissionStatusBlock(
                     systemImage: "camera.fill",
-                    title: "Test Camera",
+                    title: uiText("Test Camera"),
                     status: cameraStatus,
                     isGranted: preview.hasReceivedFrame || permissionsManager.cameraAuthorized,
                     detail: preview.errorMessage
@@ -131,7 +131,7 @@ struct CameraPermissionPreview: View {
                         await activate(forceRestart: true)
                     }
                 } label: {
-                    Text(preview.isStarting ? "Testing" : "Test Camera")
+                    Text(preview.isStarting ? uiText("Testing") : uiText("Test Camera"))
                         .frame(width: 108)
                 }
                 .disabled(preview.isStarting)
@@ -192,12 +192,12 @@ struct CameraPermissionPreview: View {
 
     private var cameraStatus: String {
         if preview.hasReceivedFrame {
-            return "Video OK"
+            return uiText("Video OK")
         }
         if permissionsManager.cameraAuthorized {
-            return "Granted"
+            return uiText("Granted")
         }
-        return "Not Granted"
+        return uiText("Not Granted")
     }
 }
 
@@ -263,7 +263,7 @@ private struct MicrophoneLevelMeter: View {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
         )
-        .accessibilityLabel("Microphone input level")
+        .accessibilityLabel(uiText("Microphone input level"))
     }
 
     private func barColor(for index: Int) -> Color {
@@ -306,11 +306,11 @@ private final class SetupMicrophoneMonitor: ObservableObject {
         if authorizationStatus == .notDetermined {
             let granted = await AVCaptureDevice.requestAccess(for: .audio)
             guard granted else {
-                fail("Microphone permission not granted")
+                fail(uiText("Microphone permission not granted"))
                 return
             }
         } else if authorizationStatus != .authorized {
-            fail("Microphone permission not granted")
+            fail(uiText("Microphone permission not granted"))
             return
         }
 
@@ -338,7 +338,7 @@ private final class SetupMicrophoneMonitor: ObservableObject {
         let inputNode = engine.inputNode
         let format = inputNode.outputFormat(forBus: 0)
         guard format.sampleRate > 0, format.channelCount > 0 else {
-            fail("No input device")
+            fail(uiText("No input device"))
             return
         }
 
@@ -375,7 +375,7 @@ private final class SetupMicrophoneMonitor: ObservableObject {
             waitForFirstSample()
         } catch {
             inputNode.removeTap(onBus: 0)
-            fail("Microphone failed to start")
+            fail(uiText("Microphone failed to start"))
             print("❌ 麦克风检测启动失败: \(error.localizedDescription)")
         }
     }
@@ -428,7 +428,7 @@ private final class SetupMicrophoneMonitor: ObservableObject {
         sampleWaitTask = Task { @MainActor in
             try? await Task.sleep(nanoseconds: 5_000_000_000)
             guard !Task.isCancelled, isRunning, !hasReceivedSample else { return }
-            errorMessage = "No audio input"
+            errorMessage = uiText("No audio input")
         }
     }
 

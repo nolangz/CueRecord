@@ -114,6 +114,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 @main
 struct CueRecordApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+    @StateObject private var interfaceLanguage = InterfaceLanguageSettings.shared
 
     var body: some Scene {
         WindowGroup {
@@ -132,22 +133,22 @@ struct CueRecordApp: App {
 
         .commands {
             CommandGroup(replacing: .appInfo) {
-                Button("About CueRecord") {
+                Button(interfaceLanguage.text("About CueRecord")) {
                     NotificationCenter.default.post(name: .openAbout, object: nil)
                 }
                 Divider()
-                Button("Check for Updates…") {
+                Button(interfaceLanguage.text("Check for Updates…")) {
                     UpdateChecker.shared.checkForUpdates()
                 }
             }
             CommandGroup(after: .appSettings) {
-                Button("Settings…") {
+                Button(interfaceLanguage.text("Settings…")) {
                     NotificationCenter.default.post(name: .openSettings, object: nil)
                 }
                 .keyboardShortcut(",", modifiers: .command)
             }
             CommandGroup(replacing: .newItem) {
-                Button("Open Folder…") {
+                Button(interfaceLanguage.text("Open Folder…")) {
                     CueRecordService.shared.openFile()
                 }
                 .keyboardShortcut("o", modifiers: .command)
@@ -155,7 +156,7 @@ struct CueRecordApp: App {
             CommandGroup(replacing: .saveItem) { }
             CommandGroup(replacing: .windowArrangement) { }
             CommandGroup(replacing: .help) {
-                Button("CueRecord Help") {
+                Button(interfaceLanguage.text("CueRecord Help")) {
                     if let url = URL(string: "https://github.com/nolanlai/cuerecord") {
                         NSWorkspace.shared.open(url)
                     }

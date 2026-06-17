@@ -194,6 +194,7 @@ private final class RecordingPreviewBarPanel: NSPanel {
 }
 
 private struct RecordingPreviewBarView: View {
+    @ObservedObject private var interfaceLanguage = InterfaceLanguageSettings.shared
     @ObservedObject private var controller: RecordingController
     @ObservedObject private var recordingState: RecordingState
     @ObservedObject private var audioManager: AudioManager
@@ -215,6 +216,10 @@ private struct RecordingPreviewBarView: View {
         self.onCancel = onCancel
     }
 
+    private func t(_ english: String) -> String {
+        interfaceLanguage.text(english)
+    }
+
     var body: some View {
         HStack(spacing: 10) {
             Button(action: onCancel) {
@@ -224,11 +229,11 @@ private struct RecordingPreviewBarView: View {
                     .background(Color.primary.opacity(0.08), in: Circle())
             }
             .buttonStyle(.plain)
-            .help("Cancel preview")
+            .help(t("Cancel preview"))
 
-            modeButton(.fullScreen, icon: "rectangle", title: "Display")
-            modeButton(.selectedWindow, icon: "macwindow", title: "Window")
-            modeButton(.selectedArea, icon: "rectangle.dashed", title: "Area")
+            modeButton(.fullScreen, icon: "rectangle", title: t("Display"))
+            modeButton(.selectedWindow, icon: "macwindow", title: t("Window"))
+            modeButton(.selectedArea, icon: "rectangle.dashed", title: t("Area"))
 
             verticalDivider
 
@@ -243,7 +248,7 @@ private struct RecordingPreviewBarView: View {
             toggleButton(
                 isOn: recordingState.microphoneEnabled,
                 icon: "mic.fill",
-                title: "Microphone"
+                title: t("Microphone")
             ) {
                 recordingState.microphoneEnabled.toggle()
             }
@@ -251,7 +256,7 @@ private struct RecordingPreviewBarView: View {
             toggleButton(
                 isOn: recordingState.systemAudioEnabled,
                 icon: "speaker.wave.2.fill",
-                title: "System Audio"
+                title: t("System Audio")
             ) {
                 recordingState.systemAudioEnabled.toggle()
             }
@@ -259,7 +264,7 @@ private struct RecordingPreviewBarView: View {
             toggleButton(
                 isOn: recordingState.cameraOverlayEnabled,
                 icon: "video.fill",
-                title: "Camera"
+                title: t("Camera")
             ) {
                 recordingState.cameraOverlayEnabled.toggle()
                 if recordingState.cameraOverlayEnabled {
@@ -285,7 +290,7 @@ private struct RecordingPreviewBarView: View {
                     } else {
                         RecordGlyph(outerDiameter: 15, innerDiameter: 6)
                     }
-                    Text("Start")
+                    Text(t("Start"))
                         .font(.system(size: 14, weight: .semibold))
                 }
                 .foregroundStyle(.white)
@@ -327,14 +332,14 @@ private struct RecordingPreviewBarView: View {
                     recordingState.selectedArea = .zero
                     controller.updatePreview()
                 } label: {
-                    Text("\(preset.title) · \(preset.subtitle)")
+                    Text("\(preset.localizedTitle) · \(preset.localizedSubtitle)")
                 }
             }
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: "aspectratio")
                     .font(.system(size: 15, weight: .semibold))
-                Text(recordingState.areaAspectRatioPreset.title)
+                Text(recordingState.areaAspectRatioPreset.localizedTitle)
                     .font(.system(size: 13, weight: .semibold))
                 Image(systemName: "chevron.down")
                     .font(.system(size: 10, weight: .bold))
@@ -349,7 +354,7 @@ private struct RecordingPreviewBarView: View {
         }
         .menuStyle(.borderlessButton)
         .fixedSize()
-        .help("Area aspect ratio")
+        .help(t("Area aspect ratio"))
     }
 
     private var displayMenu: some View {
@@ -375,18 +380,18 @@ private struct RecordingPreviewBarView: View {
         } label: {
             menuChip(
                 icon: displays.count > 1 ? "display.2" : "display",
-                title: selectedDisplay?.shortName ?? "Display"
+                title: selectedDisplay?.shortName ?? t("Display")
             )
         }
         .menuStyle(.borderlessButton)
         .fixedSize()
-        .help("Display")
+        .help(t("Display"))
     }
 
     private var cameraShapeMenu: some View {
         Menu {
             ForEach(CameraOverlayShape.allCases, id: \.self) { shape in
-                Button(shape.displayName) {
+                Button(shape.localizedDisplayName) {
                     recordingState.cameraOverlayShape = shape
                     controller.updatePreview()
                 }
@@ -415,24 +420,24 @@ private struct RecordingPreviewBarView: View {
     private var cameraShapeTitle: String {
         switch recordingState.cameraOverlayShape {
         case .circle:
-            return "Circle"
+            return t("Circle")
         case .roundedSquare:
-            return "Rectangle"
+            return t("Rounded Rectangle")
         case .roundedBox:
-            return "Rounded Box"
+            return t("Rounded Square")
         }
     }
 
     private var cameraPositionMenu: some View {
         Menu {
             ForEach(CameraOverlayPosition.allCases, id: \.self) { position in
-                Button(position.displayName) {
+                Button(position.localizedDisplayName) {
                     recordingState.cameraOverlayPosition = position
                     controller.resetCustomCameraOverlayFrame()
                 }
             }
         } label: {
-            menuChip(icon: "arrow.up.left.and.arrow.down.right", title: recordingState.cameraOverlayPosition.displayName)
+            menuChip(icon: "arrow.up.left.and.arrow.down.right", title: recordingState.cameraOverlayPosition.localizedDisplayName)
         }
         .menuStyle(.borderlessButton)
         .fixedSize()
@@ -441,13 +446,13 @@ private struct RecordingPreviewBarView: View {
     private var cameraSizeMenu: some View {
         Menu {
             ForEach(CameraOverlaySize.allCases, id: \.self) { size in
-                Button(size.displayName) {
+                Button(size.localizedDisplayName) {
                     recordingState.cameraOverlaySize = size
                     controller.updatePreview()
                 }
             }
         } label: {
-            menuChip(icon: "rectangle.resize", title: recordingState.cameraOverlaySize.displayName)
+            menuChip(icon: "rectangle.resize", title: recordingState.cameraOverlaySize.localizedDisplayName)
         }
         .menuStyle(.borderlessButton)
         .fixedSize()
@@ -456,7 +461,7 @@ private struct RecordingPreviewBarView: View {
     private var optionsMenu: some View {
         Menu {
             if recordingState.microphoneEnabled {
-                Picker("Microphone", selection: $audioManager.selectedMicrophone) {
+                Picker(t("Microphone"), selection: $audioManager.selectedMicrophone) {
                     ForEach(audioManager.availableMicrophones) { device in
                         Text(device.name)
                             .tag(device)
@@ -466,9 +471,9 @@ private struct RecordingPreviewBarView: View {
             }
 
             if recordingState.cameraOverlayEnabled {
-                Picker("Camera", selection: $cameraManager.selectedCameraID) {
+                Picker(t("Camera"), selection: $cameraManager.selectedCameraID) {
                     if cameraManager.availableCameras.isEmpty {
-                        Text("No camera available")
+                        Text(t("No camera available"))
                             .tag("")
                     } else {
                         ForEach(cameraManager.availableCameras) { camera in
@@ -481,10 +486,10 @@ private struct RecordingPreviewBarView: View {
             }
 
             if !recordingState.microphoneEnabled && !recordingState.cameraOverlayEnabled {
-                Text("No devices enabled")
+                Text(t("No devices enabled"))
             }
         } label: {
-            Text("Devices")
+            Text(t("Devices"))
                 .font(.system(size: 13, weight: .semibold))
             .frame(height: 46)
             .padding(.horizontal, 12)
@@ -553,6 +558,7 @@ private struct RecordingPreviewBarView: View {
 }
 
 private struct RecordingStopBarView: View {
+    @ObservedObject private var interfaceLanguage = InterfaceLanguageSettings.shared
     @ObservedObject private var controller: RecordingController
     @ObservedObject private var recordingState: RecordingState
     let onStop: () -> Void
@@ -564,6 +570,10 @@ private struct RecordingStopBarView: View {
         self.controller = controller
         self.recordingState = controller.recordingState
         self.onStop = onStop
+    }
+
+    private func t(_ english: String) -> String {
+        interfaceLanguage.text(english)
     }
 
     var body: some View {
@@ -597,8 +607,8 @@ private struct RecordingStopBarView: View {
             .buttonStyle(.plain)
             .disabled(controller.isStopping)
             .opacity(controller.isStopping ? 0.75 : 1)
-            .help("Stop recording")
-            .accessibilityLabel("Stop recording")
+            .help(t("Stop recording"))
+            .accessibilityLabel(t("Stop recording"))
 
             Text(timeString(from: recordingState.recordingDuration))
                 .font(.system(size: 13, weight: .semibold, design: .monospaced))
@@ -622,6 +632,7 @@ private struct RecordingStopBarView: View {
 }
 
 private struct RecordingRenderOptionsView: View {
+    @ObservedObject private var interfaceLanguage = InterfaceLanguageSettings.shared
     @ObservedObject private var controller: RecordingController
     let onDelete: () -> Void
     let onRenderAll: () -> Void
@@ -639,42 +650,46 @@ private struct RecordingRenderOptionsView: View {
         self.onRenderCameraOnly = onRenderCameraOnly
     }
 
+    private func t(_ english: String) -> String {
+        interfaceLanguage.text(english)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Choose Output")
+            Text(t("Choose Output"))
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(.primary.opacity(0.86))
 
             HStack(spacing: 8) {
                 Button(role: .destructive, action: onDelete) {
-                    Label("Delete", systemImage: "trash")
+                    Label(t("Delete"), systemImage: "trash")
                         .frame(maxWidth: .infinity)
                 }
-                .help("Delete this recording")
-                .accessibilityLabel("Delete recording")
+                .help(t("Delete this recording"))
+                .accessibilityLabel(t("Delete recording"))
 
                 Button(action: onRenderCameraOnly) {
                     VStack(spacing: 1) {
-                        Label("Camera Only", systemImage: "person.crop.rectangle")
+                        Label(t("Camera Only"), systemImage: "person.crop.rectangle")
                             .lineLimit(1)
-                        Text("Transparent")
+                        Text(t("Transparent"))
                             .font(.system(size: 9, weight: .medium))
                             .foregroundStyle(.secondary)
                     }
                     .frame(maxWidth: .infinity)
                 }
                 .disabled(!controller.canRenderPendingCameraOnly || controller.isExporting)
-                .help("Render camera only with transparent background")
-                .accessibilityLabel("Render camera only with transparent background")
+                .help(t("Render camera only with transparent background"))
+                .accessibilityLabel(t("Render camera only with transparent background"))
 
                 Button(action: onRenderAll) {
-                    Label("Render All", systemImage: "film.stack")
+                    Label(t("Render All"), systemImage: "film.stack")
                         .frame(maxWidth: .infinity)
                 }
                 .keyboardShortcut(.defaultAction)
                 .disabled(controller.isExporting)
-                .help("Render full recording")
-                .accessibilityLabel("Render full recording")
+                .help(t("Render full recording"))
+                .accessibilityLabel(t("Render full recording"))
             }
             .buttonStyle(.bordered)
             .controlSize(.regular)
@@ -699,7 +714,7 @@ private struct StopWindowDragHandle: View {
                 }
             }
             .contentShape(Rectangle())
-            .help("Drag")
+            .help(uiText("Drag"))
     }
 }
 
