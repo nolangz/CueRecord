@@ -32,6 +32,7 @@ final class RecordingController: ObservableObject {
     @Published private(set) var isExporting = false
     @Published private(set) var exportStatusText: String?
     @Published private(set) var pendingCapturedRecording: CapturedRecordingOutput?
+    @Published private(set) var recordingLibraryChangeID = UUID()
     @Published private(set) var lastOutputURL: URL?
     @Published var lastError: String?
 
@@ -404,38 +405,42 @@ final class RecordingController: ObservableObject {
     }
 
     private func capturedRecordingOutput(for outputURL: URL) -> CapturedRecordingOutput? {
-        guard FileManager.default.fileExists(atPath: outputURL.path) else { return nil }
-
-        let basePath = outputURL.deletingPathExtension().path
-        let fileExtension = outputURL.pathExtension
-        let cameraURL = URL(fileURLWithPath: "\(basePath)_camera.\(fileExtension)")
-        let overlayURL = URL(fileURLWithPath: "\(basePath)_overlay.json")
-
-        return CapturedRecordingOutput(
-            outputURL: outputURL,
-            cameraURL: FileManager.default.fileExists(atPath: cameraURL.path) ? cameraURL : nil,
-            overlayMetadataURL: FileManager.default.fileExists(atPath: overlayURL.path) ? overlayURL : nil
-        )
+        CapturedRecordingOutput(discovering: outputURL)
     }
 
     func renderPendingCapturedRecording(mode: RecordingRenderMode) {
         guard let capturedOutput = pendingCapturedRecording, !isExporting else { return }
-        pendingCapturedRecording = nil
-        screenRecorder.renderCapturedRecording(capturedOutput, mode: mode)
+        renderCapturedRecording(capturedOutput, mode: mode)
     }
 
     func renderPendingCapturedRecording(editDecision: RecordingEditDecision) {
         renderPendingCapturedRecording(mode: .edited(editDecision))
     }
 
+    func renderCapturedRecording(_ capturedOutput: CapturedRecordingOutput, editDecision: RecordingEditDecision) {
+        renderCapturedRecording(capturedOutput, mode: .edited(editDecision))
+    }
+
+    func renderCapturedRecording(_ capturedOutput: CapturedRecordingOutput, mode: RecordingRenderMode) {
+        guard !isExporting else { return }
+        if pendingCapturedRecording?.outputURL.standardizedFileURL == capturedOutput.outputURL.standardizedFileURL {
+            pendingCapturedRecording = nil
+        }
+        screenRecorder.renderCapturedRecording(capturedOutput, mode: mode)
+    }
+
     func deletePendingCapturedRecording() {
         guard let capturedOutput = pendingCapturedRecording else { return }
         pendingCapturedRecording = nil
+        deleteCapturedRecording(capturedOutput)
+    }
 
+    func deleteCapturedRecording(_ capturedOutput: CapturedRecordingOutput) {
         do {
             _ = try screenRecorder.deleteCapturedRecording(capturedOutput)
             lastOutputURL = nil
             exportStatusText = nil
+            recordingLibraryChangeID = UUID()
         } catch {
             lastError = error.localizedDescription
         }
@@ -450,6 +455,7 @@ final class RecordingController: ObservableObject {
             isExporting = false
             exportStatusText = nil
             lastOutputURL = result.finalOutputURL
+            recordingLibraryChangeID = UUID()
             revealRecordingInFinder(result.finalOutputURL)
         }
     }

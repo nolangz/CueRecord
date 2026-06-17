@@ -22,6 +22,27 @@ nonisolated struct CapturedRecordingOutput: Sendable {
     let cameraURL: URL?
     let overlayMetadataURL: URL?
 
+    init(outputURL: URL, cameraURL: URL?, overlayMetadataURL: URL?) {
+        self.outputURL = outputURL
+        self.cameraURL = cameraURL
+        self.overlayMetadataURL = overlayMetadataURL
+    }
+
+    init?(discovering outputURL: URL, fileManager: FileManager = .default) {
+        guard fileManager.fileExists(atPath: outputURL.path) else { return nil }
+
+        let basePath = outputURL.deletingPathExtension().path
+        let fileExtension = outputURL.pathExtension
+        let cameraURL = URL(fileURLWithPath: "\(basePath)_camera.\(fileExtension)")
+        let overlayURL = URL(fileURLWithPath: "\(basePath)_overlay.json")
+
+        self.init(
+            outputURL: outputURL,
+            cameraURL: fileManager.fileExists(atPath: cameraURL.path) ? cameraURL : nil,
+            overlayMetadataURL: fileManager.fileExists(atPath: overlayURL.path) ? overlayURL : nil
+        )
+    }
+
     var canRenderCameraOnly: Bool {
         guard let cameraURL, let overlayMetadataURL else { return false }
         return FileManager.default.fileExists(atPath: cameraURL.path)
@@ -92,7 +113,10 @@ nonisolated enum RecordingArtifactOrganizer {
         for capturedOutput: CapturedRecordingOutput,
         fileManager: FileManager = .default
     ) throws -> [URL] {
-        let sessionDirectory = capturedOutput.outputURL.deletingLastPathComponent()
+        let outputDirectory = capturedOutput.outputURL.deletingLastPathComponent()
+        let sessionDirectory = outputDirectory.lastPathComponent == rawDataDirectoryName
+            ? outputDirectory.deletingLastPathComponent()
+            : outputDirectory
         let rawDataDirectory = sessionDirectory.appendingPathComponent(rawDataDirectoryName, isDirectory: true)
         let baseName = capturedOutput.outputURL.deletingPathExtension().lastPathComponent
         var deletedURLs: [URL] = []

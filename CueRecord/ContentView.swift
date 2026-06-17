@@ -1017,9 +1017,15 @@ struct ContentView: View {
         let date = markdownIndex < project.modifiedDates.count ? project.modifiedDates[markdownIndex] : nil
         let markdownURL = markdownIndex < project.markdownURLs.count ? project.markdownURLs[markdownIndex] : nil
         let isHovered = markdownURL != nil && hoveredMarkdownURL == markdownURL
+        let isEditingTitle = isSelected && editingPageTitleIndex == markdownIndex
+        let recordedTakes = recordingTakes(project: project, markdownIndex: markdownIndex)
 
         return HStack(spacing: 8) {
-            if isSelected && editingPageTitleIndex == markdownIndex {
+            if !recordedTakes.isEmpty && !isEditingTitle {
+                recordingTakeMenu(recordedTakes)
+            }
+
+            if isEditingTitle {
                 TextField("", text: $editingPageTitleText)
                     .textFieldStyle(.plain)
                     .font(.system(size: 12, weight: .medium))
@@ -1071,6 +1077,57 @@ struct ContentView: View {
         .contextMenu {
             markdownContextMenu(projectIndex: projectIndex, markdownIndex: markdownIndex)
         }
+    }
+
+    @ViewBuilder
+    private func recordingTakeMenu(_ takes: [RecordingTake]) -> some View {
+        Menu {
+            ForEach(takes) { take in
+                Button {
+                    presentRecordedTakeEditor(for: take.capturedOutput)
+                } label: {
+                    Label(recordingTakeMenuTitle(take), systemImage: "film")
+                }
+            }
+        } label: {
+            Image(systemName: "scissors")
+                .font(.system(size: 11, weight: .semibold))
+                .frame(width: 18, height: 22)
+                .contentShape(Rectangle())
+        }
+        .menuStyle(.borderlessButton)
+        .buttonStyle(.plain)
+        .foregroundStyle(.secondary)
+        .accessibilityLabel(t("Choose Take"))
+        .help(t("Edit Recorded Take"))
+    }
+
+    private func recordingTakes(project: CueRecordProject, markdownIndex: Int) -> [RecordingTake] {
+        let markdownTitle = markdownIndex < project.markdownTitles.count
+            ? project.markdownTitles[markdownIndex]
+            : "Untitled"
+
+        return RecordingTakeDiscovery.takes(
+            projectURL: project.url,
+            projectTitle: project.title,
+            markdownTitle: markdownTitle
+        )
+    }
+
+    private func recordingTakeMenuTitle(_ take: RecordingTake) -> String {
+        let title = "\(t("Take")) \(take.takeNumber)"
+        guard let createdAt = take.createdAt else {
+            return title
+        }
+
+        return "\(title) · \(recordingTakeDateString(from: createdAt))"
+    }
+
+    private func recordingTakeDateString(from date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return formatter.string(from: date)
     }
 
     @ViewBuilder
@@ -1423,6 +1480,36 @@ struct ContentView: View {
         stop()
         recordingController.stopRecording {
             presentPostRecordingRenderOptions()
+        }
+    }
+
+    private func presentRecordedTakeEditor(for capturedOutput: CapturedRecordingOutput) {
+        guard !recordingController.isRecording,
+              !recordingController.isStopping,
+              !recordingController.isStarting,
+              !isShowingPostRecordingOptions
+        else {
+            return
+        }
+
+        isTextFocused = false
+        isShowingPostRecordingOptions = true
+        DispatchQueue.main.async {
+            recordingEditorWindow.show(
+                controller: recordingController,
+                capturedOutput: capturedOutput,
+                onDelete: {
+                    isShowingPostRecordingOptions = false
+                    recordingController.deleteCapturedRecording(capturedOutput)
+                },
+                onExport: { decision in
+                    isShowingPostRecordingOptions = false
+                    recordingController.renderCapturedRecording(capturedOutput, editDecision: decision)
+                },
+                onClose: {
+                    isShowingPostRecordingOptions = false
+                }
+            )
         }
     }
 

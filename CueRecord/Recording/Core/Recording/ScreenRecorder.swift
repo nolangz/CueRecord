@@ -2466,6 +2466,31 @@ class ScreenRecorder: NSObject, ObservableObject {
         return url
     }
 
+    private nonisolated static func promoteGeneratedOutputIfNeeded(
+        _ generatedOutputURL: URL?,
+        sourceOutputURL: URL,
+        sessionDirectory: URL
+    ) -> URL? {
+        guard let generatedOutputURL else { return nil }
+
+        let sourceDirectory = sourceOutputURL.deletingLastPathComponent()
+        guard sourceDirectory.lastPathComponent == RecordingArtifactOrganizer.rawDataDirectoryName else {
+            return generatedOutputURL
+        }
+
+        let destinationURL = sessionDirectory.appendingPathComponent(generatedOutputURL.lastPathComponent)
+        do {
+            if FileManager.default.fileExists(atPath: destinationURL.path) {
+                try FileManager.default.removeItem(at: destinationURL)
+            }
+            try FileManager.default.moveItem(at: generatedOutputURL, to: destinationURL)
+            return destinationURL
+        } catch {
+            print("⚠️  Failed to promote rendered recording from raw_data: \(error.localizedDescription)")
+            return generatedOutputURL
+        }
+    }
+
     private static func startRecordingPostProcessing(
         capturedOutput: CapturedRecordingOutput,
         mode: RecordingRenderMode,
@@ -2489,6 +2514,9 @@ class ScreenRecorder: NSObject, ObservableObject {
     ) async -> RecordingPostProcessingResult {
         print("ℹ️  Starting recording post-processing")
         let outputURL = capturedOutput.outputURL
+        let outputDirectory = outputURL.deletingLastPathComponent()
+        let isSourceInRawData = outputDirectory.lastPathComponent == RecordingArtifactOrganizer.rawDataDirectoryName
+        let sessionDirectory = isSourceInRawData ? outputDirectory.deletingLastPathComponent() : outputDirectory
         let exportStart = Date()
         let compositedURL: URL?
         let cameraOnlyURL: URL?
@@ -2518,11 +2546,16 @@ class ScreenRecorder: NSObject, ObservableObject {
             cameraOnlyURL = nil
         }
 
-        let finalOutputURL = compositedURL
-            ?? cameraOnlyURL
+        let generatedOutputURL = compositedURL ?? cameraOnlyURL
+        let promotedGeneratedOutputURL = promoteGeneratedOutputIfNeeded(
+            generatedOutputURL,
+            sourceOutputURL: outputURL,
+            sessionDirectory: sessionDirectory
+        )
+        let finalOutputURL = promotedGeneratedOutputURL
             ?? (mode == .cameraOnlyTransparent ? capturedOutput.cameraURL : nil)
             ?? outputURL
-        if compositedURL != nil || cameraOnlyURL != nil {
+        if generatedOutputURL != nil {
             updateMetricsExportDuration(
                 for: outputURL,
                 duration: Date().timeIntervalSince(exportStart)
@@ -2530,18 +2563,23 @@ class ScreenRecorder: NSObject, ObservableObject {
         }
 
         let movedRawArtifactCount: Int
-        do {
-            let movedURLs = try RecordingArtifactOrganizer.moveRawArtifacts(
-                in: outputURL.deletingLastPathComponent(),
-                keeping: finalOutputURL
-            )
-            movedRawArtifactCount = movedURLs.count
-            if movedRawArtifactCount > 0 {
-                print("✅ Raw recording data moved to \(RecordingArtifactOrganizer.rawDataDirectoryName): \(movedRawArtifactCount) files")
+        let finalOutputIsInSessionDirectory = finalOutputURL.deletingLastPathComponent().standardizedFileURL == sessionDirectory.standardizedFileURL
+        if !isSourceInRawData || finalOutputIsInSessionDirectory {
+            do {
+                let movedURLs = try RecordingArtifactOrganizer.moveRawArtifacts(
+                    in: sessionDirectory,
+                    keeping: finalOutputURL
+                )
+                movedRawArtifactCount = movedURLs.count
+                if movedRawArtifactCount > 0 {
+                    print("✅ Raw recording data moved to \(RecordingArtifactOrganizer.rawDataDirectoryName): \(movedRawArtifactCount) files")
+                }
+            } catch {
+                movedRawArtifactCount = 0
+                print("⚠️  Failed to organize raw recording data: \(error.localizedDescription)")
             }
-        } catch {
+        } else {
             movedRawArtifactCount = 0
-            print("⚠️  Failed to organize raw recording data: \(error.localizedDescription)")
         }
 
         return RecordingPostProcessingResult(
