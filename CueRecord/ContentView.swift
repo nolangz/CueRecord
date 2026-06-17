@@ -284,7 +284,7 @@ struct ContentView: View {
         aiScriptTask?.cancel()
         aiScriptTask = Task {
             do {
-                let generatedMarkdown = try await DeepSeekChatClient().generateBreathCuts(
+                let generatedMarkdown = try await AIChatCompletionsClient().generateBreathCuts(
                     request: submission.request,
                     apiKey: submission.apiKey
                 )

@@ -1,31 +1,6 @@
 import Foundation
 import Security
 
-enum AIScriptModel: String, CaseIterable, Identifiable {
-    case deepSeekV4Flash = "deepseek-v4-flash"
-    case deepSeekV4Pro = "deepseek-v4-pro"
-
-    var id: String { rawValue }
-
-    var displayName: String {
-        switch self {
-        case .deepSeekV4Flash:
-            return "DeepSeek V4 Flash"
-        case .deepSeekV4Pro:
-            return "DeepSeek V4 Pro"
-        }
-    }
-
-    var shortDescription: String {
-        switch self {
-        case .deepSeekV4Flash:
-            return "Fast breath cutting"
-        case .deepSeekV4Pro:
-            return "More careful pacing"
-        }
-    }
-}
-
 enum AIBreathMarkerMode: String, CaseIterable, Identifiable {
     case marked
     case clean
@@ -77,18 +52,20 @@ enum AIBreathMarkerMode: String, CaseIterable, Identifiable {
 struct AIBreathCutRequest {
     var sourceMarkdown: String
     var customPrompt: String
-    var model: AIScriptModel
+    var model: AIChatModelConfiguration
     var markerMode: AIBreathMarkerMode
 }
 
 struct AIBreathCutSubmission {
     var request: AIBreathCutRequest
-    var apiKey: String
+    var apiKey: String?
     var generatedTitle: String
 }
 
 enum AIScriptError: LocalizedError {
     case invalidAPIKey
+    case invalidEndpoint
+    case invalidModelID
     case emptySource
     case invalidResponse
     case apiError(String)
@@ -96,31 +73,48 @@ enum AIScriptError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .invalidAPIKey:
-            return "Enter a DeepSeek API key."
+            return "Enter an API key."
+        case .invalidEndpoint:
+            return "Enter a valid OpenAI-compatible base URL."
+        case .invalidModelID:
+            return "Enter a model ID."
         case .emptySource:
             return "Write or select a script before using AI Breath Cuts."
         case .invalidResponse:
-            return "DeepSeek returned an unexpected response."
+            return "The provider returned an unexpected response."
         case .apiError(let message):
             return message
         }
     }
 }
 
-final class DeepSeekAPIKeyStore {
-    static let shared = DeepSeekAPIKeyStore()
+final class AIProviderAPIKeyStore {
+    static let shared = AIProviderAPIKeyStore()
 
-    private let service = "com.nolanlai.cuerecord.deepseek"
-    private let account = "api-key"
+    private let service = "com.nolanlai.cuerecord.ai-provider"
+    private let legacyDeepSeekService = "com.nolanlai.cuerecord.deepseek"
+    private let legacyDeepSeekAccount = "api-key"
 
     private init() {}
 
-    var hasAPIKey: Bool {
-        loadAPIKey()?.isEmpty == false
+    func hasAPIKey(for account: String) -> Bool {
+        loadAPIKey(for: account)?.isEmpty == false
     }
 
-    func loadAPIKey() -> String? {
-        var query = baseQuery()
+    func loadAPIKey(for account: String) -> String? {
+        if let key = loadAPIKey(account: account, service: service) {
+            return key
+        }
+
+        if account == "deepseek" {
+            return loadAPIKey(account: legacyDeepSeekAccount, service: legacyDeepSeekService)
+        }
+
+        return nil
+    }
+
+    private func loadAPIKey(account: String, service: String) -> String? {
+        var query = baseQuery(account: account, service: service)
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
 
@@ -130,12 +124,12 @@ final class DeepSeekAPIKeyStore {
         return String(data: data, encoding: .utf8)
     }
 
-    func saveAPIKey(_ apiKey: String) throws {
+    func saveAPIKey(_ apiKey: String, for account: String) throws {
         let trimmed = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { throw AIScriptError.invalidAPIKey }
         let data = Data(trimmed.utf8)
 
-        var query = baseQuery()
+        var query = baseQuery(account: account, service: service)
         let attributes: [String: Any] = [
             kSecValueData as String: data
         ]
@@ -157,14 +151,14 @@ final class DeepSeekAPIKeyStore {
         }
     }
 
-    func deleteAPIKey() throws {
-        let status = SecItemDelete(baseQuery() as CFDictionary)
+    func deleteAPIKey(for account: String) throws {
+        let status = SecItemDelete(baseQuery(account: account, service: service) as CFDictionary)
         guard status == errSecSuccess || status == errSecItemNotFound else {
             throw keychainError(status: status)
         }
     }
 
-    private func baseQuery() -> [String: Any] {
+    private func baseQuery(account: String, service: String) -> [String: Any] {
         [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -178,29 +172,33 @@ final class DeepSeekAPIKeyStore {
     }
 }
 
-struct DeepSeekChatClient {
-    private let endpoint = URL(string: "https://api.deepseek.com/chat/completions")!
+struct AIChatCompletionsClient {
     private let session: URLSession
 
     init(session: URLSession = .shared) {
         self.session = session
     }
 
-    func generateBreathCuts(request generationRequest: AIBreathCutRequest, apiKey: String) async throws -> String {
-        let trimmedKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedKey.isEmpty else { throw AIScriptError.invalidAPIKey }
-
+    func generateBreathCuts(request generationRequest: AIBreathCutRequest, apiKey: String?) async throws -> String {
         let source = generationRequest.sourceMarkdown.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !source.isEmpty else { throw AIScriptError.emptySource }
 
-        var urlRequest = URLRequest(url: endpoint)
+        let configuration = generationRequest.model
+        let trimmedKey = apiKey?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if configuration.requiresAPIKey && trimmedKey.isEmpty {
+            throw AIScriptError.invalidAPIKey
+        }
+
+        var urlRequest = URLRequest(url: configuration.endpoint)
         urlRequest.httpMethod = "POST"
         urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        urlRequest.setValue("Bearer \(trimmedKey)", forHTTPHeaderField: "Authorization")
+        if !trimmedKey.isEmpty {
+            urlRequest.setValue("Bearer \(trimmedKey)", forHTTPHeaderField: "Authorization")
+        }
         urlRequest.timeoutInterval = 120
 
-        let body = DeepSeekChatRequest(
-            model: generationRequest.model.rawValue,
+        let body = ChatCompletionsRequest(
+            model: configuration.modelID,
             messages: [
                 .init(role: "system", content: systemPrompt),
                 .init(role: "user", content: userPrompt(for: generationRequest))
@@ -208,36 +206,36 @@ struct DeepSeekChatClient {
             temperature: 0.25,
             stream: false
         )
-        urlRequest.httpBody = try JSONEncoder.deepSeekEncoder.encode(body)
+        urlRequest.httpBody = try JSONEncoder.chatCompletionsEncoder.encode(body)
 
         let (data, response) = try await session.data(for: urlRequest)
         if let httpResponse = response as? HTTPURLResponse, !(200..<300).contains(httpResponse.statusCode) {
-            if let errorResponse = try? JSONDecoder().decode(DeepSeekErrorResponse.self, from: data) {
+            if let errorResponse = try? JSONDecoder().decode(ChatCompletionsErrorResponse.self, from: data) {
                 throw AIScriptError.apiError(errorResponse.error.message)
             }
             let message = String(data: data, encoding: .utf8) ?? "Request failed."
-            throw AIScriptError.apiError("DeepSeek request failed (\(httpResponse.statusCode)): \(message)")
+            throw AIScriptError.apiError("\(configuration.providerDisplayName) request failed (\(httpResponse.statusCode)): \(message)")
         }
 
-        let decoded: DeepSeekChatResponse
+        let decoded: ChatCompletionsResponse
         do {
-            decoded = try JSONDecoder().decode(DeepSeekChatResponse.self, from: data)
+            decoded = try JSONDecoder().decode(ChatCompletionsResponse.self, from: data)
         } catch {
-            throw AIScriptError.apiError("DeepSeek returned an unexpected response format: \(responseSnippet(from: data))")
+            throw AIScriptError.apiError("\(configuration.providerDisplayName) returned an unexpected response format: \(responseSnippet(from: data))")
         }
 
         guard let choice = decoded.choices.first else {
-            throw AIScriptError.apiError("DeepSeek returned no choices: \(responseSnippet(from: data))")
+            throw AIScriptError.apiError("\(configuration.providerDisplayName) returned no choices: \(responseSnippet(from: data))")
         }
 
         if choice.finishReason?.caseInsensitiveCompare("length") == .orderedSame {
-            throw AIScriptError.apiError("DeepSeek stopped because the response hit its length limit. No draft was created. Try a shorter source script or split it into sections.")
+            throw AIScriptError.apiError("\(configuration.providerDisplayName) stopped because the response hit its length limit. No draft was created. Try a shorter source script or split it into sections.")
         }
 
         let content = sanitizeMarkdownResponse(choice.message.content ?? "")
         guard !content.isEmpty else {
             let reason = choice.finishReason.map { " Finish reason: \($0)." } ?? ""
-            throw AIScriptError.apiError("DeepSeek returned an empty draft.\(reason) Response: \(responseSnippet(from: data))")
+            throw AIScriptError.apiError("\(configuration.providerDisplayName) returned an empty draft.\(reason) Response: \(responseSnippet(from: data))")
         }
         return content
     }
@@ -329,9 +327,9 @@ struct DeepSeekChatClient {
     }
 }
 
-private struct DeepSeekChatRequest: Encodable {
+private struct ChatCompletionsRequest: Encodable {
     let model: String
-    let messages: [DeepSeekChatMessage]
+    let messages: [ChatCompletionsMessage]
     let temperature: Double
     let stream: Bool
 
@@ -343,16 +341,16 @@ private struct DeepSeekChatRequest: Encodable {
     }
 }
 
-private struct DeepSeekChatMessage: Codable {
+private struct ChatCompletionsMessage: Codable {
     let role: String
     let content: String?
 }
 
-private struct DeepSeekChatResponse: Decodable {
+private struct ChatCompletionsResponse: Decodable {
     let choices: [Choice]
 
     struct Choice: Decodable {
-        let message: DeepSeekChatMessage
+        let message: ChatCompletionsMessage
         let finishReason: String?
 
         enum CodingKeys: String, CodingKey {
@@ -362,7 +360,7 @@ private struct DeepSeekChatResponse: Decodable {
     }
 }
 
-private struct DeepSeekErrorResponse: Decodable {
+private struct ChatCompletionsErrorResponse: Decodable {
     let error: APIError
 
     struct APIError: Decodable {
@@ -371,7 +369,7 @@ private struct DeepSeekErrorResponse: Decodable {
 }
 
 private extension JSONEncoder {
-    static var deepSeekEncoder: JSONEncoder {
+    static var chatCompletionsEncoder: JSONEncoder {
         let encoder = JSONEncoder()
         encoder.outputFormatting = []
         return encoder
