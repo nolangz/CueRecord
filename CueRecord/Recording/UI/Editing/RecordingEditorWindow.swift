@@ -423,6 +423,12 @@ private struct RecordingEditorView: View {
     let onDelete: () -> Void
     let onExport: (RecordingEditDecision) -> Void
 
+    @State private var timelineHeight: CGFloat = 260
+    @State private var timelineResizeStartHeight: CGFloat?
+
+    private let minimumTimelineHeight: CGFloat = 190
+    private let maximumTimelineHeight: CGFloat = 380
+
     private func t(_ english: String) -> String {
         interfaceLanguage.text(english)
     }
@@ -434,14 +440,16 @@ private struct RecordingEditorView: View {
                     .frame(minWidth: 620, maxWidth: .infinity, maxHeight: .infinity)
 
                 inspector
-                    .frame(minWidth: 280, idealWidth: 312, maxWidth: 360, maxHeight: .infinity)
+                    .frame(minWidth: 220, idealWidth: 240, maxWidth: 270, maxHeight: .infinity)
             }
             .frame(maxHeight: .infinity)
 
             Divider()
 
+            timelineResizeHandle
+
             RecordingEditorTimeline(session: session)
-                .frame(height: 220)
+                .frame(height: timelineHeight)
 
             Divider()
 
@@ -493,17 +501,36 @@ private struct RecordingEditorView: View {
 
     private var inspector: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                Text(t("Current Cut"))
-                    .font(.headline)
+            VStack(alignment: .leading, spacing: 16) {
+                currentCutSummary
 
                 modeSection
-                timingSection
                 cameraSection
             }
-            .padding(20)
+            .padding(16)
         }
         .background(Color(nsColor: .controlBackgroundColor))
+    }
+
+    private var currentCutSummary: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(t("Current Cut"))
+                .font(.headline)
+
+            if let cut = session.selectedCut {
+                let index = (session.cuts.firstIndex { $0.id == cut.id } ?? 0) + 1
+                HStack(spacing: 6) {
+                    Image(systemName: cut.layoutMode.systemImage)
+                        .foregroundStyle(.secondary)
+                    Text("\(t("Cut")) \(index)")
+                        .font(.subheadline.weight(.semibold))
+                    Spacer()
+                }
+                Text("\(timeString(cut.startTime)) - \(timeString(cut.endTime))")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+        }
     }
 
     private var modeSection: some View {
@@ -523,43 +550,13 @@ private struct RecordingEditorView: View {
         }
     }
 
-    private var timingSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(t("Timing"))
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-
-            timeSlider(title: t("Start"), value: startTimeBinding, range: 0...max(session.duration, 0.1))
-            timeSlider(title: t("End"), value: endTimeBinding, range: 0...max(session.duration, 0.1))
-        }
-    }
-
     @ViewBuilder
     private var cameraSection: some View {
         if session.hasCamera {
             VStack(alignment: .leading, spacing: 12) {
-                Text(t("Camera Frame"))
+                Text(t("Camera Shape"))
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
-
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(t("Position"))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 2), spacing: 8) {
-                        positionButton(t("Top Left"), x: 0.06, y: 0.06)
-                        positionButton(t("Top Right"), x: 0.70, y: 0.06)
-                        positionButton(t("Bottom Left"), x: 0.06, y: 0.70)
-                        positionButton(t("Bottom Right"), x: 0.70, y: 0.70)
-                    }
-                }
-
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(t("Size"))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Slider(value: cameraSizeBinding, in: 0.12...0.46)
-                }
 
                 Picker(t("Shape"), selection: cameraShapeBinding) {
                     ForEach(CameraOverlayShape.allCases, id: \.self) { shape in
@@ -575,6 +572,33 @@ private struct RecordingEditorView: View {
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
         }
+    }
+
+    private var timelineResizeHandle: some View {
+        RoundedRectangle(cornerRadius: 999, style: .continuous)
+            .fill(Color.secondary.opacity(timelineResizeStartHeight == nil ? 0.24 : 0.48))
+            .frame(width: 58, height: 3)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 5)
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { value in
+                        if timelineResizeStartHeight == nil {
+                            timelineResizeStartHeight = timelineHeight
+                        }
+                        let startHeight = timelineResizeStartHeight ?? timelineHeight
+                        timelineHeight = min(
+                            max(startHeight - value.translation.height, minimumTimelineHeight),
+                            maximumTimelineHeight
+                        )
+                    }
+                    .onEnded { _ in
+                        timelineResizeStartHeight = nil
+                    }
+            )
+            .help(t("Resize Timeline"))
+            .background(Color(nsColor: .windowBackgroundColor))
     }
 
     private var footer: some View {
@@ -614,41 +638,6 @@ private struct RecordingEditorView: View {
         }
     }
 
-    private var startTimeBinding: Binding<Double> {
-        Binding {
-            session.selectedCut?.startTime ?? 0
-        } set: { value in
-            session.updateSelectedCut { cut in
-                cut.startTime = min(value, cut.endTime - 0.1)
-            }
-        }
-    }
-
-    private var endTimeBinding: Binding<Double> {
-        Binding {
-            session.selectedCut?.endTime ?? session.duration
-        } set: { value in
-            session.updateSelectedCut { cut in
-                cut.endTime = max(value, cut.startTime + 0.1)
-            }
-        }
-    }
-
-    private var cameraSizeBinding: Binding<Double> {
-        Binding {
-            session.selectedCut?.cameraFrame.width ?? RecordingEditNormalizedRect.defaultCameraFrame.width
-        } set: { value in
-            session.updateSelectedCut { cut in
-                let centerX = cut.cameraFrame.x + cut.cameraFrame.width / 2
-                let centerY = cut.cameraFrame.y + cut.cameraFrame.height / 2
-                cut.cameraFrame.width = value
-                cut.cameraFrame.height = value
-                cut.cameraFrame.x = centerX - value / 2
-                cut.cameraFrame.y = centerY - value / 2
-            }
-        }
-    }
-
     private var cameraShapeBinding: Binding<CameraOverlayShape> {
         Binding {
             session.selectedCut?.cameraShape ?? .circle
@@ -656,32 +645,6 @@ private struct RecordingEditorView: View {
             session.updateSelectedCut { cut in
                 cut.cameraShape = shape
             }
-        }
-    }
-
-    private func positionButton(_ title: String, x: Double, y: Double) -> some View {
-        Button(title) {
-            session.updateSelectedCut { cut in
-                cut.cameraFrame.x = x
-                cut.cameraFrame.y = y
-            }
-        }
-        .buttonStyle(.bordered)
-        .controlSize(.small)
-    }
-
-    private func timeSlider(title: String, value: Binding<Double>, range: ClosedRange<Double>) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
-            HStack {
-                Text(title)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Text(timeString(value.wrappedValue))
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
-            }
-            Slider(value: value, in: range)
         }
     }
 
@@ -698,12 +661,12 @@ private struct RecordingEditorTimeline: View {
     @ObservedObject private var interfaceLanguage = InterfaceLanguageSettings.shared
     @ObservedObject var session: RecordingEditSession
 
-    private let trackHeaderWidth: CGFloat = 84
+    private let trackHeaderWidth: CGFloat = 128
     private let horizontalPadding: CGFloat = 12
-    private let rulerHeight: CGFloat = 34
-    private let trackHeight: CGFloat = 72
+    private let rulerHeight: CGFloat = 30
+    private let trackHeight: CGFloat = 82
     private let minimumPixelsPerSecond: CGFloat = 4
-    private let defaultPixelsPerSecond: CGFloat = 48
+    private let defaultPixelsPerSecond: CGFloat = 56
     private let maximumPixelsPerSecond: CGFloat = 260
     private let maximumContentWidth: CGFloat = 64_000
     private let playheadAnchorID = "recordingTimelinePlayheadAnchor"
@@ -720,8 +683,8 @@ private struct RecordingEditorTimeline: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 10) {
-                Label(t("Timeline"), systemImage: "film.stack")
-                    .font(.system(size: 13, weight: .semibold))
+                Label(t("Main Timeline"), systemImage: "film.stack")
+                    .font(.system(size: 12, weight: .semibold))
                 Text("\(timeString(session.playheadTime)) / \(timeString(session.duration))")
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
@@ -747,7 +710,7 @@ private struct RecordingEditorTimeline: View {
                 .help(t("Delete Cut"))
             }
             .padding(.horizontal, horizontalPadding)
-            .frame(height: 42)
+            .frame(height: 40)
 
             Divider()
 
@@ -789,11 +752,17 @@ private struct RecordingEditorTimeline: View {
                             }
                         }
                     }
+                    .background(Color(nsColor: .controlBackgroundColor))
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .strokeBorder(Color.secondary.opacity(0.12), lineWidth: 1)
+                    }
                     .padding(.horizontal, horizontalPadding)
 
                     Spacer(minLength: 0)
                 }
-                .padding(.top, 10)
+                .padding(.top, 8)
                 .onAppear {
                     updateTimelineViewport(width: viewportWidth)
                     pixelsPerSecond = clampedPixelsPerSecond(pixelsPerSecond == defaultPixelsPerSecond ? defaultPixelsPerSecond : pixelsPerSecond)
@@ -803,8 +772,8 @@ private struct RecordingEditorTimeline: View {
                 }
             }
         }
-        .padding(.bottom, 10)
-        .background(.bar)
+        .padding(.bottom, 8)
+        .background(Color(nsColor: .windowBackgroundColor))
     }
 
     private var timelineZoomControls: some View {
@@ -884,7 +853,7 @@ private struct RecordingEditorTimeline: View {
         VStack(spacing: 0) {
             HStack {
                 Text("TC")
-                    .font(.caption2.monospacedDigit())
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
                     .foregroundStyle(.tertiary)
                 Spacer()
             }
@@ -893,17 +862,17 @@ private struct RecordingEditorTimeline: View {
             .background(Color.primary.opacity(0.035))
 
             HStack(spacing: 8) {
-                Text("V1")
-                    .font(.caption.monospacedDigit().weight(.semibold))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 24, alignment: .leading)
+                RoundedRectangle(cornerRadius: 2, style: .continuous)
+                    .fill(Color.accentColor)
+                    .frame(width: 8, height: 8)
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(t("Clip"))
-                        .font(.caption.weight(.semibold))
+                    Text(t("Cut Track"))
+                        .font(.system(size: 10, weight: .bold))
+                        .textCase(.uppercase)
                         .lineLimit(1)
                     Text("\(session.cuts.count) \(t("Cuts"))")
-                        .font(.caption2.monospacedDigit())
+                        .font(.system(size: 9, design: .monospaced))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
@@ -966,7 +935,7 @@ private struct RecordingEditorTimeline: View {
     private func timelineTrack(width: CGFloat, duration: Double, pixelsPerSecond: CGFloat) -> some View {
         ZStack(alignment: .topLeading) {
             Rectangle()
-                .fill(Color.primary.opacity(0.035))
+                .fill(Color.primary.opacity(0.032))
                 .overlay(alignment: .top) {
                     Rectangle()
                         .fill(Color.secondary.opacity(0.14))
@@ -1014,7 +983,7 @@ private struct RecordingEditorTimeline: View {
                         }
                     }
                 )
-                .offset(x: x, y: 12)
+                .offset(x: x, y: 17)
             }
         }
     }
@@ -1169,6 +1138,7 @@ private struct RecordingTimelineCutSegment: View {
     let onTrimEnd: (Double) -> Void
 
     @State private var trimBase: (start: Double, end: Double)?
+    @State private var isHovered = false
 
     private func t(_ english: String) -> String {
         interfaceLanguage.text(english)
@@ -1177,21 +1147,26 @@ private struct RecordingTimelineCutSegment: View {
     var body: some View {
         ZStack(alignment: .leading) {
             RoundedRectangle(cornerRadius: 7, style: .continuous)
-                .fill(segmentColor.opacity(isSelected ? 0.92 : 0.78))
+                .fill(segmentColor.opacity(isSelected ? 0.94 : (isHovered ? 0.84 : 0.72)))
                 .overlay {
                     RoundedRectangle(cornerRadius: 7, style: .continuous)
                         .strokeBorder(
-                            isSelected ? Color.white.opacity(0.94) : Color.white.opacity(0.22),
+                            isSelected ? Color.white.opacity(0.94) : Color.white.opacity(isHovered ? 0.36 : 0.18),
                             lineWidth: isSelected ? 1.5 : 1
                         )
                 }
+                .overlay(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .fill(Color.white.opacity(0.24))
+                        .frame(width: 4)
+                }
                 .overlay(alignment: .top) {
                     Rectangle()
-                        .fill(Color.white.opacity(0.18))
+                        .fill(Color.white.opacity(isSelected ? 0.22 : 0.14))
                         .frame(height: 1)
                         .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
                 }
-                .shadow(color: .black.opacity(isSelected ? 0.20 : 0.08), radius: isSelected ? 5 : 2, y: 2)
+                .shadow(color: .black.opacity(isSelected ? 0.24 : 0.10), radius: isSelected ? 8 : 3, y: 3)
 
             HStack(spacing: 8) {
                 if width > 64 {
@@ -1223,6 +1198,7 @@ private struct RecordingTimelineCutSegment: View {
         .frame(width: width, height: 48)
         .contentShape(Rectangle())
         .onTapGesture(perform: onSelect)
+        .onHover { isHovered = $0 }
         .accessibilityLabel("\(t("Cut")) \(index + 1), \(t(cut.layoutMode.shortLabel))")
     }
 
@@ -1248,7 +1224,7 @@ private struct RecordingTimelineCutSegment: View {
             .frame(width: 24, height: 48)
             .overlay {
                 Capsule()
-                    .fill(Color.white.opacity(isSelected ? 0.86 : 0.42))
+                    .fill(Color.white.opacity(isSelected || isHovered ? 0.86 : 0.28))
                     .frame(width: 3, height: 28)
             }
             .contentShape(Rectangle())
@@ -1289,9 +1265,28 @@ private struct RecordingEditorPreviewCanvas: View {
     @ObservedObject private var interfaceLanguage = InterfaceLanguageSettings.shared
     @ObservedObject var session: RecordingEditSession
     @State private var dragStartFrame: RecordingEditNormalizedRect?
+    @State private var resizeStartFrame: RecordingEditNormalizedRect?
 
     private func t(_ english: String) -> String {
         interfaceLanguage.text(english)
+    }
+
+    private enum CameraResizeCorner: CaseIterable, Identifiable {
+        case topLeft
+        case topRight
+        case bottomLeft
+        case bottomRight
+
+        var id: Self { self }
+
+        var alignment: Alignment {
+            switch self {
+            case .topLeft: return .topLeading
+            case .topRight: return .topTrailing
+            case .bottomLeft: return .bottomLeading
+            case .bottomRight: return .bottomTrailing
+            }
+        }
     }
 
     var body: some View {
@@ -1352,36 +1347,123 @@ private struct RecordingEditorPreviewCanvas: View {
         let x = canvasSize.width * CGFloat(frame.x) + width / 2
         let y = canvasSize.height * CGFloat(frame.y) + height / 2
 
-        return RecordingCameraPreviewSurface(player: session.cameraPlayer, shape: cut.cameraShape)
-            .frame(width: width, height: height)
-            .overlay(alignment: .bottomTrailing) {
-                Image(systemName: "arrow.up.left.and.arrow.down.right")
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(.white)
-                    .padding(5)
-                    .background(.black.opacity(0.38), in: Circle())
-                    .padding(6)
+        return ZStack {
+            RecordingCameraPreviewSurface(player: session.cameraPlayer, shape: cut.cameraShape)
+                .contentShape(Rectangle())
+                .gesture(cameraMoveGesture(startingFrom: frame, canvasSize: canvasSize))
+
+            ForEach(CameraResizeCorner.allCases) { corner in
+                cameraResizeHandle
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: corner.alignment)
+                    .gesture(cameraResizeGesture(startingFrom: frame, canvasSize: canvasSize, corner: corner))
             }
-            .position(x: x, y: y)
-            .gesture(
-                DragGesture(minimumDistance: 0)
-                    .onChanged { value in
-                        if dragStartFrame == nil {
-                            dragStartFrame = frame
-                        }
-                        guard var next = dragStartFrame else { return }
-                        next.x += Double(value.translation.width / max(canvasSize.width, 1))
-                        next.y += Double(value.translation.height / max(canvasSize.height, 1))
-                        next.clamp()
-                        session.updateSelectedCut { cut in
-                            cut.cameraFrame = next
-                        }
-                    }
-                    .onEnded { _ in
-                        dragStartFrame = nil
-                    }
-            )
-            .accessibilityLabel(t("Camera Frame"))
+        }
+        .frame(width: width, height: height)
+        .position(x: x, y: y)
+        .accessibilityLabel(t("Camera Frame"))
+    }
+
+    private var cameraResizeHandle: some View {
+        Circle()
+            .fill(.black.opacity(0.54))
+            .frame(width: 18, height: 18)
+            .overlay {
+                Circle()
+                    .strokeBorder(.white.opacity(0.90), lineWidth: 1.5)
+            }
+            .shadow(color: .black.opacity(0.25), radius: 4, y: 1)
+            .padding(5)
+            .contentShape(Rectangle())
+            .help(t("Resize Camera Frame"))
+    }
+
+    private func cameraMoveGesture(
+        startingFrom frame: RecordingEditNormalizedRect,
+        canvasSize: CGSize
+    ) -> some Gesture {
+        DragGesture(minimumDistance: 0)
+            .onChanged { value in
+                if dragStartFrame == nil {
+                    dragStartFrame = frame
+                }
+                guard var next = dragStartFrame else { return }
+                next.x += Double(value.translation.width / max(canvasSize.width, 1))
+                next.y += Double(value.translation.height / max(canvasSize.height, 1))
+                next.clamp()
+                session.updateSelectedCut { cut in
+                    cut.cameraFrame = next
+                }
+            }
+            .onEnded { _ in
+                dragStartFrame = nil
+            }
+    }
+
+    private func cameraResizeGesture(
+        startingFrom frame: RecordingEditNormalizedRect,
+        canvasSize: CGSize,
+        corner: CameraResizeCorner
+    ) -> some Gesture {
+        DragGesture(minimumDistance: 0)
+            .onChanged { value in
+                if resizeStartFrame == nil {
+                    resizeStartFrame = frame
+                }
+                guard let base = resizeStartFrame else { return }
+
+                let next = resizedCameraFrame(
+                    from: base,
+                    translation: value.translation,
+                    canvasSize: canvasSize,
+                    corner: corner
+                )
+                session.updateSelectedCut { cut in
+                    cut.cameraFrame = next
+                }
+            }
+            .onEnded { _ in
+                resizeStartFrame = nil
+            }
+    }
+
+    private func resizedCameraFrame(
+        from base: RecordingEditNormalizedRect,
+        translation: CGSize,
+        canvasSize: CGSize,
+        corner: CameraResizeCorner
+    ) -> RecordingEditNormalizedRect {
+        let dx = Double(translation.width / max(canvasSize.width, 1))
+        let dy = Double(translation.height / max(canvasSize.height, 1))
+        let minimumSize = 0.08
+
+        var left = base.x
+        var top = base.y
+        var right = base.x + base.width
+        var bottom = base.y + base.height
+
+        switch corner {
+        case .topLeft:
+            left = min(max(left + dx, 0), right - minimumSize)
+            top = min(max(top + dy, 0), bottom - minimumSize)
+        case .topRight:
+            right = max(min(right + dx, 1), left + minimumSize)
+            top = min(max(top + dy, 0), bottom - minimumSize)
+        case .bottomLeft:
+            left = min(max(left + dx, 0), right - minimumSize)
+            bottom = max(min(bottom + dy, 1), top + minimumSize)
+        case .bottomRight:
+            right = max(min(right + dx, 1), left + minimumSize)
+            bottom = max(min(bottom + dy, 1), top + minimumSize)
+        }
+
+        var next = RecordingEditNormalizedRect(
+            x: left,
+            y: top,
+            width: right - left,
+            height: bottom - top
+        )
+        next.clamp()
+        return next
     }
 
     private func aspectFit(_ sourceSize: CGSize, in containerSize: CGSize) -> CGSize {
