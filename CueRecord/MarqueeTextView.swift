@@ -60,6 +60,7 @@ struct SpeechScrollView: View {
     /// Continuous word progress (e.g. 3.7 = 70% through 4th word). Drives scroll in smooth mode.
     var smoothWordProgress: Double = 0
     var lineAnchor: TeleprompterLineAnchor = .center
+    var topSafeInset: CGFloat = 0
 
     var isListening: Bool = true
     @State private var scrollOffset: CGFloat = 0
@@ -217,7 +218,7 @@ struct SpeechScrollView: View {
         case .center:
             return containerHeight * 0.5
         case .top:
-            return estimatedLineHeight * 1.5
+            return max(estimatedLineHeight * 1.5, topSafeInset + estimatedLineHeight)
         }
     }
 

@@ -934,6 +934,7 @@ struct NotchOverlayView: View {
                 smoothScroll: listeningMode != .wordTracking,
                 smoothWordProgress: timerWordProgress,
                 lineAnchor: .top,
+                topSafeInset: menuBarHeight,
                 isListening: isEffectivelyListening
             )
             .padding(.horizontal, 12)

@@ -215,6 +215,7 @@ struct NotchPreviewContent: View {
                         smoothScroll: settings.listeningMode != .wordTracking,
                         smoothWordProgress: previewWordProgress,
                         lineAnchor: .top,
+                        topSafeInset: topPadding,
                         isListening: settings.listeningMode != .wordTracking
                     )
                     .padding(.horizontal, 16)
