@@ -1,0 +1,1949 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CueRecord 项目展示</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Noto+Serif+SC:wght@500;700;900&display=swap"
+      rel="stylesheet"
+    />
+
+    <style>
+      /* ===========================================
+         CSS CUSTOM PROPERTIES (THEME)
+         Change these variables to retheme the full deck.
+         =========================================== */
+      :root {
+        --console: #0e0e10;
+        --console-2: #17181c;
+        --paper: #f3eee1;
+        --paper-2: #fbf7ed;
+        --ink: #151515;
+        --muted: #80796e;
+        --line: rgba(21, 21, 21, 0.12);
+        --line-light: rgba(255, 255, 255, 0.14);
+        --blue: #5b8cff;
+        --green: #28d17c;
+        --amber: #ffb347;
+        --red: #ff4d4d;
+        --lavender: #9b8cff;
+        --cyan: #59d6df;
+
+        --font-display: "Noto Serif SC", serif;
+        --font-body: "Manrope", "Noto Serif SC", sans-serif;
+        --title-size: clamp(2.3rem, 5.4vw, 5.2rem);
+        --h2-size: clamp(1.55rem, 3.2vw, 3rem);
+        --h3-size: clamp(1rem, 1.55vw, 1.45rem);
+        --body-size: clamp(0.78rem, 1.25vw, 1.06rem);
+        --small-size: clamp(0.62rem, 0.9vw, 0.82rem);
+        --micro-size: clamp(0.52rem, 0.75vw, 0.7rem);
+
+        --slide-padding: clamp(1rem, 3.7vw, 4rem);
+        --content-gap: clamp(0.7rem, 1.8vw, 1.8rem);
+        --element-gap: clamp(0.38rem, 0.9vw, 0.9rem);
+        --card-pad: clamp(0.72rem, 1.35vw, 1.35rem);
+        --tight-pad: clamp(0.42rem, 0.8vw, 0.75rem);
+        --radius-sm: clamp(0.26rem, 0.45vw, 0.5rem);
+        --radius-md: clamp(0.38rem, 0.65vw, 0.7rem);
+
+        --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+        --duration-normal: 0.65s;
+        --duration-slow: 1.1s;
+      }
+
+      /* ===========================================
+         RESET
+         Keeps browser defaults from changing slide geometry.
+         =========================================== */
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      /* ===========================================
+         VIEWPORT FITTING: MANDATORY BASE STYLES
+         Include this ENTIRE file in every presentation.
+         These styles ensure slides fit exactly in the viewport.
+         =========================================== */
+
+      /* 1. Lock html/body to viewport */
+      html,
+      body {
+        height: 100%;
+        overflow-x: hidden;
+      }
+
+      html {
+        scroll-snap-type: y mandatory;
+        scroll-behavior: smooth;
+      }
+
+      /* 2. Each slide = exact viewport height */
+      .slide {
+        width: 100vw;
+        height: 100vh;
+        height: 100dvh; /* Dynamic viewport height for mobile browsers */
+        overflow: hidden; /* CRITICAL: Prevent ANY overflow */
+        scroll-snap-align: start;
+        display: flex;
+        flex-direction: column;
+        position: relative;
+      }
+
+      /* 3. Content container with flex for centering */
+      .slide-content {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        max-height: 100%;
+        overflow: hidden; /* Double-protection against overflow */
+        padding: var(--slide-padding);
+      }
+
+      /* 4. ALL typography uses clamp() for responsive scaling */
+      :root {
+        /* Titles scale from mobile to desktop */
+        --title-size: clamp(1.5rem, 5vw, 4rem);
+        --h2-size: clamp(1.25rem, 3.5vw, 2.5rem);
+        --h3-size: clamp(1rem, 2.5vw, 1.75rem);
+
+        /* Body text */
+        --body-size: clamp(0.75rem, 1.5vw, 1.125rem);
+        --small-size: clamp(0.65rem, 1vw, 0.875rem);
+
+        /* Spacing scales with viewport */
+        --slide-padding: clamp(1rem, 4vw, 4rem);
+        --content-gap: clamp(0.5rem, 2vw, 2rem);
+        --element-gap: clamp(0.25rem, 1vw, 1rem);
+      }
+
+      /* 5. Cards/containers use viewport-relative max sizes */
+      .card,
+      .container,
+      .content-box {
+        max-width: min(90vw, 1000px);
+        max-height: min(80vh, 700px);
+      }
+
+      /* 6. Lists auto-scale with viewport */
+      .feature-list,
+      .bullet-list {
+        gap: clamp(0.4rem, 1vh, 1rem);
+      }
+
+      .feature-list li,
+      .bullet-list li {
+        font-size: var(--body-size);
+        line-height: 1.4;
+      }
+
+      /* 7. Grids adapt to available space */
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(min(100%, 250px), 1fr));
+        gap: clamp(0.5rem, 1.5vw, 1rem);
+      }
+
+      /* 8. Images constrained to viewport */
+      img,
+      .image-container {
+        max-width: 100%;
+        max-height: min(50vh, 400px);
+        object-fit: contain;
+      }
+
+      /* ===========================================
+         RESPONSIVE BREAKPOINTS
+         Aggressive scaling for smaller viewports
+         =========================================== */
+
+      /* Short viewports (< 700px height) */
+      @media (max-height: 700px) {
+        :root {
+          --slide-padding: clamp(0.75rem, 3vw, 2rem);
+          --content-gap: clamp(0.4rem, 1.5vw, 1rem);
+          --title-size: clamp(1.25rem, 4.5vw, 2.5rem);
+          --h2-size: clamp(1rem, 3vw, 1.75rem);
+        }
+      }
+
+      /* Very short viewports (< 600px height) */
+      @media (max-height: 600px) {
+        :root {
+          --slide-padding: clamp(0.5rem, 2.5vw, 1.5rem);
+          --content-gap: clamp(0.3rem, 1vw, 0.75rem);
+          --title-size: clamp(1.1rem, 4vw, 2rem);
+          --body-size: clamp(0.7rem, 1.2vw, 0.95rem);
+        }
+
+        /* Hide non-essential elements */
+        .nav-dots,
+        .keyboard-hint,
+        .decorative {
+          display: none;
+        }
+      }
+
+      /* Extremely short (landscape phones, < 500px height) */
+      @media (max-height: 500px) {
+        :root {
+          --slide-padding: clamp(0.4rem, 2vw, 1rem);
+          --title-size: clamp(1rem, 3.5vw, 1.5rem);
+          --h2-size: clamp(0.9rem, 2.5vw, 1.25rem);
+          --body-size: clamp(0.65rem, 1vw, 0.85rem);
+        }
+      }
+
+      /* Narrow viewports (< 600px width) */
+      @media (max-width: 600px) {
+        :root {
+          --title-size: clamp(1.25rem, 7vw, 2.5rem);
+        }
+
+        /* Stack grids vertically */
+        .grid {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      /* ===========================================
+         REDUCED MOTION
+         Respect user preferences
+         =========================================== */
+      @media (prefers-reduced-motion: reduce) {
+        *,
+        *::before,
+        *::after {
+          animation-duration: 0.01ms !important;
+          transition-duration: 0.2s !important;
+        }
+
+        html {
+          scroll-behavior: auto;
+        }
+      }
+
+      /* ===========================================
+         THEME VARIABLE OVERRIDES
+         Reapplies the deck scale after mandatory viewport defaults.
+         =========================================== */
+      :root {
+        --title-size: clamp(2rem, 4.6vw, 4.1rem);
+        --h2-size: clamp(1.42rem, 3vw, 2.7rem);
+        --h3-size: clamp(0.96rem, 1.45vw, 1.34rem);
+        --body-size: clamp(0.78rem, 1.2vw, 1.02rem);
+        --small-size: clamp(0.62rem, 0.9vw, 0.82rem);
+        --slide-padding: clamp(1rem, 4vw, 4rem);
+        --content-gap: clamp(0.5rem, 2vw, 2rem);
+        --element-gap: clamp(0.25rem, 1vw, 1rem);
+      }
+
+      /* ===========================================
+         GLOBAL DECK STYLES
+         Establishes typography, progress UI, and texture.
+         =========================================== */
+      body {
+        font-family: var(--font-body);
+        color: var(--paper);
+        background: var(--console);
+      }
+
+      main {
+        background: var(--console);
+      }
+
+      .slide {
+        isolation: isolate;
+        background:
+          linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px),
+          linear-gradient(140deg, #0e0e10 0%, #17181c 58%, #111216 100%);
+        background-size:
+          clamp(1.5rem, 3vw, 3rem) clamp(1.5rem, 3vw, 3rem),
+          clamp(1.5rem, 3vw, 3rem) clamp(1.5rem, 3vw, 3rem),
+          100% 100%;
+      }
+
+      .slide.light {
+        color: var(--ink);
+        background:
+          linear-gradient(rgba(21, 21, 21, 0.045) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(21, 21, 21, 0.035) 1px, transparent 1px),
+          linear-gradient(135deg, var(--paper-2) 0%, var(--paper) 100%);
+        background-size:
+          clamp(1.7rem, 3vw, 3rem) clamp(1.7rem, 3vw, 3rem),
+          clamp(1.7rem, 3vw, 3rem) clamp(1.7rem, 3vw, 3rem),
+          100% 100%;
+      }
+
+      .progress-bar {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 0%;
+        height: clamp(0.12rem, 0.3vw, 0.24rem);
+        background: linear-gradient(90deg, var(--red), var(--amber), var(--green), var(--blue));
+        z-index: 1000;
+        transition: width 0.24s ease;
+      }
+
+      .nav-dots {
+        position: fixed;
+        right: clamp(0.48rem, 1.3vw, 1.2rem);
+        top: 50%;
+        transform: translateY(-50%);
+        display: flex;
+        flex-direction: column;
+        gap: clamp(0.34rem, 0.7vw, 0.62rem);
+        z-index: 1000;
+      }
+
+      .nav-dot {
+        width: clamp(0.38rem, 0.72vw, 0.58rem);
+        height: clamp(0.38rem, 0.72vw, 0.58rem);
+        border-radius: 999px;
+        border: 1px solid rgba(255, 255, 255, 0.5);
+        background: rgba(255, 255, 255, 0.16);
+        cursor: pointer;
+        transition:
+          transform 0.22s ease,
+          background 0.22s ease,
+          border-color 0.22s ease;
+      }
+
+      .nav-dot.active {
+        transform: scale(1.35);
+        background: var(--green);
+        border-color: var(--green);
+      }
+
+      .light .nav-dot {
+        border-color: rgba(21, 21, 21, 0.45);
+        background: rgba(21, 21, 21, 0.12);
+      }
+
+      .slide-index {
+        position: absolute;
+        top: var(--slide-padding);
+        right: var(--slide-padding);
+        z-index: 2;
+        font-size: var(--small-size);
+        font-weight: 800;
+        letter-spacing: 0;
+        color: rgba(255, 255, 255, 0.58);
+      }
+
+      .light .slide-index {
+        color: rgba(21, 21, 21, 0.52);
+      }
+
+      .kicker {
+        display: inline-flex;
+        align-items: center;
+        gap: clamp(0.28rem, 0.6vw, 0.54rem);
+        width: fit-content;
+        border: 1px solid currentColor;
+        border-radius: var(--radius-sm);
+        padding: clamp(0.26rem, 0.58vw, 0.48rem) clamp(0.44rem, 0.9vw, 0.76rem);
+        font-size: var(--micro-size);
+        font-weight: 800;
+        color: var(--amber);
+        text-transform: uppercase;
+      }
+
+      .light .kicker {
+        color: #8a4b00;
+      }
+
+      h1,
+      h2,
+      h3 {
+        font-family: var(--font-display);
+        letter-spacing: 0;
+      }
+
+      h1 {
+        font-size: var(--title-size);
+        line-height: 0.98;
+        font-weight: 900;
+        max-width: min(86vw, 1100px);
+      }
+
+      h2 {
+        font-size: var(--h2-size);
+        line-height: 1.08;
+        font-weight: 900;
+      }
+
+      h3 {
+        font-size: var(--h3-size);
+        line-height: 1.14;
+        font-weight: 800;
+      }
+
+      p {
+        font-size: var(--body-size);
+        line-height: 1.58;
+      }
+
+      .lead {
+        max-width: min(76vw, 760px);
+        color: rgba(255, 255, 255, 0.78);
+        font-size: clamp(0.92rem, 1.55vw, 1.26rem);
+      }
+
+      .light .lead {
+        color: rgba(21, 21, 21, 0.72);
+      }
+
+      .accent-blue {
+        color: var(--blue);
+      }
+
+      .accent-green {
+        color: var(--green);
+      }
+
+      .accent-red {
+        color: var(--red);
+      }
+
+      .accent-amber {
+        color: var(--amber);
+      }
+
+      .mono {
+        font-family: "Manrope", sans-serif;
+        font-weight: 800;
+      }
+
+      /* ===========================================
+         ANIMATIONS
+         Slides reveal content as they enter the viewport.
+         =========================================== */
+      .reveal,
+      .reveal-left,
+      .reveal-scale {
+        opacity: 0;
+        transition:
+          opacity var(--duration-normal) var(--ease-out-expo),
+          transform var(--duration-normal) var(--ease-out-expo),
+          filter var(--duration-normal) var(--ease-out-expo);
+        will-change: opacity, transform;
+      }
+
+      .reveal {
+        transform: translateY(clamp(1rem, 2vw, 2rem));
+      }
+
+      .reveal-left {
+        transform: translateX(calc(-1 * clamp(1rem, 2vw, 2rem)));
+      }
+
+      .reveal-scale {
+        transform: scale(0.94);
+        filter: blur(clamp(0.25rem, 0.8vw, 0.6rem));
+      }
+
+      .slide.visible .reveal,
+      .slide.visible .reveal-left,
+      .slide.visible .reveal-scale {
+        opacity: 1;
+        transform: translate(0, 0) scale(1);
+        filter: blur(0);
+      }
+
+      .slide.visible .delay-1 {
+        transition-delay: 0.1s;
+      }
+
+      .slide.visible .delay-2 {
+        transition-delay: 0.2s;
+      }
+
+      .slide.visible .delay-3 {
+        transition-delay: 0.3s;
+      }
+
+      .slide.visible .delay-4 {
+        transition-delay: 0.4s;
+      }
+
+      .pulse {
+        animation: pulseLight 2.2s ease-in-out infinite;
+      }
+
+      @keyframes pulseLight {
+        0%,
+        100% {
+          opacity: 0.48;
+          transform: scale(0.96);
+        }
+        50% {
+          opacity: 1;
+          transform: scale(1);
+        }
+      }
+
+      .wave-bar {
+        transform-origin: bottom;
+        animation: wave 1.1s ease-in-out infinite;
+      }
+
+      .wave-bar:nth-child(2) {
+        animation-delay: 0.12s;
+      }
+
+      .wave-bar:nth-child(3) {
+        animation-delay: 0.24s;
+      }
+
+      .wave-bar:nth-child(4) {
+        animation-delay: 0.36s;
+      }
+
+      .wave-bar:nth-child(5) {
+        animation-delay: 0.48s;
+      }
+
+      @keyframes wave {
+        0%,
+        100% {
+          transform: scaleY(0.38);
+        }
+        50% {
+          transform: scaleY(1);
+        }
+      }
+
+      /* ===========================================
+         SHARED COMPONENTS
+         Reusable visual blocks used across the deck.
+         =========================================== */
+      .two-col {
+        display: grid;
+        grid-template-columns: minmax(0, 0.92fr) minmax(0, 1.08fr);
+        gap: var(--content-gap);
+        align-items: center;
+        min-height: 0;
+      }
+
+      .three-col {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: var(--element-gap);
+        min-height: 0;
+      }
+
+      .four-col {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: var(--element-gap);
+        min-height: 0;
+      }
+
+      .card {
+        border: 1px solid var(--line-light);
+        border-radius: var(--radius-md);
+        padding: var(--card-pad);
+        background: rgba(255, 255, 255, 0.055);
+      }
+
+      .light .card {
+        border-color: var(--line);
+        background: rgba(255, 255, 255, 0.62);
+      }
+
+      .tag {
+        display: inline-flex;
+        align-items: center;
+        gap: clamp(0.22rem, 0.45vw, 0.42rem);
+        border: 1px solid var(--line-light);
+        border-radius: var(--radius-sm);
+        padding: clamp(0.2rem, 0.5vw, 0.42rem) clamp(0.34rem, 0.72vw, 0.64rem);
+        color: rgba(255, 255, 255, 0.76);
+        font-size: var(--micro-size);
+        font-weight: 800;
+        white-space: nowrap;
+      }
+
+      .light .tag {
+        border-color: var(--line);
+        color: rgba(21, 21, 21, 0.66);
+        background: rgba(255, 255, 255, 0.38);
+      }
+
+      .dot {
+        width: clamp(0.42rem, 0.7vw, 0.64rem);
+        height: clamp(0.42rem, 0.7vw, 0.64rem);
+        border-radius: 999px;
+        background: currentColor;
+        flex: 0 0 auto;
+      }
+
+      .mini-label {
+        font-size: var(--micro-size);
+        font-weight: 800;
+        color: rgba(255, 255, 255, 0.58);
+        text-transform: uppercase;
+      }
+
+      .light .mini-label {
+        color: rgba(21, 21, 21, 0.5);
+      }
+
+      .caption {
+        font-size: var(--small-size);
+        line-height: 1.42;
+        color: rgba(255, 255, 255, 0.62);
+      }
+
+      .light .caption {
+        color: rgba(21, 21, 21, 0.58);
+      }
+
+      .stack {
+        display: flex;
+        flex-direction: column;
+        gap: var(--element-gap);
+        min-height: 0;
+      }
+
+      .row {
+        display: flex;
+        align-items: center;
+        gap: var(--element-gap);
+      }
+
+      /* ===========================================
+         SLIDE 01: HERO
+         Product signal and visual metaphor for the app.
+         =========================================== */
+      .hero-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(17rem, 0.72fr);
+        gap: var(--content-gap);
+        align-items: center;
+        min-height: 0;
+      }
+
+      .hero-copy {
+        display: flex;
+        flex-direction: column;
+        gap: var(--content-gap);
+      }
+
+      .brand-row {
+        display: flex;
+        align-items: center;
+        gap: clamp(0.62rem, 1.2vw, 1.1rem);
+      }
+
+      .brand-mark {
+        width: clamp(3.3rem, 7vw, 6.2rem);
+        height: clamp(3.3rem, 7vw, 6.2rem);
+        border-radius: clamp(0.7rem, 1.5vw, 1.3rem);
+        overflow: hidden;
+        box-shadow: 0 clamp(0.6rem, 1.6vw, 1.4rem) clamp(1rem, 2.8vw, 2.4rem) rgba(0, 0, 0, 0.34);
+        flex: 0 0 auto;
+      }
+
+      .hero-tags {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--element-gap);
+      }
+
+      .recording-rig {
+        position: relative;
+        min-height: min(58vh, 34rem);
+        border: 1px solid var(--line-light);
+        border-radius: var(--radius-md);
+        padding: clamp(0.72rem, 1.4vw, 1.25rem);
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.035)),
+          #121318;
+        overflow: hidden;
+      }
+
+      .screen-frame {
+        height: 57%;
+        border: 1px solid rgba(255, 255, 255, 0.22);
+        border-radius: var(--radius-md);
+        background:
+          linear-gradient(90deg, rgba(91, 140, 255, 0.16), transparent 34%),
+          linear-gradient(rgba(255, 255, 255, 0.065) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(255, 255, 255, 0.055) 1px, transparent 1px),
+          #202229;
+        background-size:
+          100% 100%,
+          clamp(0.9rem, 1.8vw, 1.6rem) clamp(0.9rem, 1.8vw, 1.6rem),
+          clamp(0.9rem, 1.8vw, 1.6rem) clamp(0.9rem, 1.8vw, 1.6rem),
+          100% 100%;
+        position: relative;
+      }
+
+      .screen-frame::before {
+        content: "REC";
+        position: absolute;
+        top: clamp(0.48rem, 0.9vw, 0.82rem);
+        left: clamp(0.48rem, 0.9vw, 0.82rem);
+        color: var(--red);
+        font-size: var(--micro-size);
+        font-weight: 800;
+      }
+
+      .camera-bubble {
+        position: absolute;
+        right: clamp(0.55rem, 1vw, 0.9rem);
+        bottom: clamp(0.55rem, 1vw, 0.9rem);
+        width: clamp(3.4rem, 7.5vw, 6rem);
+        height: clamp(3.4rem, 7.5vw, 6rem);
+        border-radius: 999px;
+        border: clamp(0.14rem, 0.3vw, 0.25rem) solid #ffffff;
+        background:
+          radial-gradient(circle at 44% 38%, #f8d0b3 0%, #f8d0b3 23%, transparent 24%),
+          linear-gradient(155deg, #49372f, #171717);
+      }
+
+      .teleprompter-strip {
+        margin-top: var(--element-gap);
+        border-radius: var(--radius-md);
+        padding: var(--tight-pad);
+        background: #050506;
+        border: 1px solid rgba(255, 255, 255, 0.16);
+      }
+
+      .script-line {
+        height: clamp(0.5rem, 1.05vw, 0.88rem);
+        margin: clamp(0.18rem, 0.4vw, 0.34rem) 0;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.16);
+      }
+
+      .script-line.active {
+        width: 84%;
+        background: linear-gradient(90deg, var(--green), rgba(40, 209, 124, 0.22));
+      }
+
+      .script-line.short {
+        width: 58%;
+      }
+
+      .script-line.mid {
+        width: 72%;
+      }
+
+      .control-row {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: var(--element-gap);
+        margin-top: var(--element-gap);
+      }
+
+      .control-pill {
+        border-radius: var(--radius-sm);
+        padding: var(--tight-pad);
+        background: rgba(255, 255, 255, 0.08);
+        font-size: var(--small-size);
+        font-weight: 800;
+        color: rgba(255, 255, 255, 0.76);
+      }
+
+      /* ===========================================
+         SLIDE 02: PAIN POINT
+         Makes the current fragmented workflow tangible.
+         =========================================== */
+      .mess-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 0.86fr) minmax(0, 1.14fr);
+        gap: var(--content-gap);
+        align-items: center;
+      }
+
+      .mess-board {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: var(--element-gap);
+        transform: rotate(-1.4deg);
+      }
+
+      .mess-note {
+        min-height: clamp(4.5rem, 14vh, 8rem);
+        border: 1px solid var(--line);
+        border-radius: var(--radius-sm);
+        padding: var(--card-pad);
+        background: rgba(255, 255, 255, 0.7);
+        box-shadow: 0 clamp(0.42rem, 1vw, 0.9rem) clamp(1rem, 2.4vw, 2rem) rgba(21, 21, 21, 0.08);
+      }
+
+      .mess-note:nth-child(2) {
+        transform: rotate(2.4deg);
+      }
+
+      .mess-note:nth-child(3) {
+        transform: rotate(-2deg);
+      }
+
+      .mess-note h3 {
+        margin-bottom: clamp(0.28rem, 0.7vw, 0.62rem);
+      }
+
+      .mess-note p {
+        font-size: var(--small-size);
+        color: rgba(21, 21, 21, 0.65);
+      }
+
+      .one-line-answer {
+        border-left: clamp(0.18rem, 0.4vw, 0.34rem) solid var(--red);
+        padding-left: clamp(0.72rem, 1.4vw, 1.2rem);
+        max-width: min(76vw, 780px);
+      }
+
+      /* ===========================================
+         SLIDE 03: FOUR BUILDING BLOCKS
+         Uses a simple mental model for beginners.
+         =========================================== */
+      .block-card {
+        display: flex;
+        flex-direction: column;
+        gap: var(--element-gap);
+        min-height: clamp(9rem, 28vh, 15.5rem);
+      }
+
+      .block-icon {
+        width: clamp(2.35rem, 4.5vw, 4rem);
+        height: clamp(2.35rem, 4.5vw, 4rem);
+        border-radius: var(--radius-md);
+        display: grid;
+        place-items: center;
+        font-size: clamp(1.2rem, 2.3vw, 2rem);
+        font-weight: 900;
+        color: var(--ink);
+      }
+
+      .block-card:nth-child(1) .block-icon {
+        background: var(--amber);
+      }
+
+      .block-card:nth-child(2) .block-icon {
+        background: var(--green);
+      }
+
+      .block-card:nth-child(3) .block-icon {
+        background: var(--red);
+        color: #ffffff;
+      }
+
+      .block-card:nth-child(4) .block-icon {
+        background: var(--blue);
+        color: #ffffff;
+      }
+
+      /* ===========================================
+         SLIDE 04: USER FLOW
+         Explains the app by walking through a real session.
+         =========================================== */
+      .flow-line {
+        display: grid;
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+        gap: var(--element-gap);
+        position: relative;
+      }
+
+      .flow-step {
+        border-radius: var(--radius-md);
+        padding: var(--card-pad);
+        background: rgba(255, 255, 255, 0.08);
+        border: 1px solid var(--line-light);
+        min-height: clamp(8.6rem, 25vh, 14rem);
+        display: flex;
+        flex-direction: column;
+        gap: var(--element-gap);
+      }
+
+      .flow-number {
+        width: clamp(1.9rem, 3.5vw, 3rem);
+        height: clamp(1.9rem, 3.5vw, 3rem);
+        border-radius: 999px;
+        display: grid;
+        place-items: center;
+        background: var(--paper);
+        color: var(--ink);
+        font-weight: 900;
+        font-size: var(--small-size);
+      }
+
+      .flow-step p {
+        color: rgba(255, 255, 255, 0.68);
+        font-size: var(--small-size);
+      }
+
+      .flow-arrow {
+        color: var(--green);
+        font-size: clamp(1.2rem, 2vw, 1.7rem);
+        font-weight: 900;
+        align-self: end;
+      }
+
+      /* ===========================================
+         SLIDE 05: SMART TELEPROMPTER
+         Visualizes local speech recognition and follow-along.
+         =========================================== */
+      .prompter-demo {
+        display: grid;
+        grid-template-columns: minmax(0, 1.04fr) minmax(0, 0.96fr);
+        gap: var(--content-gap);
+        align-items: center;
+      }
+
+      .reader-panel {
+        border-radius: var(--radius-md);
+        border: 1px solid var(--line);
+        padding: var(--card-pad);
+        background: rgba(255, 255, 255, 0.7);
+      }
+
+      .reader-line {
+        font-size: clamp(0.86rem, 1.5vw, 1.18rem);
+        line-height: 1.75;
+        color: rgba(21, 21, 21, 0.42);
+      }
+
+      .reader-line.current {
+        color: var(--ink);
+        font-weight: 900;
+        text-decoration: underline;
+        text-decoration-color: var(--green);
+        text-decoration-thickness: clamp(0.1rem, 0.25vw, 0.2rem);
+        text-underline-offset: clamp(0.16rem, 0.35vw, 0.28rem);
+      }
+
+      .asr-pipeline {
+        display: flex;
+        flex-direction: column;
+        gap: var(--element-gap);
+      }
+
+      .pipeline-item {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--element-gap);
+        border: 1px solid var(--line);
+        border-radius: var(--radius-sm);
+        padding: var(--tight-pad);
+        background: rgba(255, 255, 255, 0.52);
+      }
+
+      .pipeline-item strong {
+        font-size: var(--small-size);
+      }
+
+      .pipeline-item span {
+        color: rgba(21, 21, 21, 0.58);
+        font-size: var(--micro-size);
+        font-weight: 800;
+      }
+
+      .waveform {
+        display: flex;
+        align-items: end;
+        gap: clamp(0.12rem, 0.28vw, 0.22rem);
+        height: clamp(1.2rem, 2.4vw, 2rem);
+      }
+
+      .wave-bar {
+        width: clamp(0.18rem, 0.35vw, 0.28rem);
+        height: 100%;
+        background: var(--green);
+        border-radius: 999px;
+      }
+
+      /* ===========================================
+         SLIDE 06: RECORDING CONSOLE
+         Communicates capture modes and media inputs.
+         =========================================== */
+      .capture-layout {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 0.9fr);
+        gap: var(--content-gap);
+        align-items: center;
+      }
+
+      .capture-screen {
+        min-height: min(52vh, 31rem);
+        border-radius: var(--radius-md);
+        border: 1px solid var(--line-light);
+        padding: var(--card-pad);
+        background: #191a20;
+        position: relative;
+        overflow: hidden;
+      }
+
+      .capture-target {
+        position: absolute;
+        border: clamp(0.12rem, 0.25vw, 0.22rem) dashed currentColor;
+        border-radius: var(--radius-sm);
+      }
+
+      .target-full {
+        inset: clamp(1rem, 2vw, 1.8rem);
+        color: var(--blue);
+      }
+
+      .target-window {
+        left: clamp(3rem, 7vw, 6rem);
+        top: clamp(2.6rem, 6vh, 4.8rem);
+        right: clamp(2rem, 6vw, 5rem);
+        bottom: clamp(3.8rem, 9vh, 6.5rem);
+        color: var(--amber);
+      }
+
+      .target-area {
+        left: clamp(5rem, 11vw, 9rem);
+        top: clamp(6rem, 16vh, 10rem);
+        width: clamp(7rem, 18vw, 13rem);
+        height: clamp(4rem, 10vw, 7rem);
+        color: var(--green);
+      }
+
+      .capture-label {
+        position: absolute;
+        left: clamp(1rem, 2vw, 1.8rem);
+        bottom: clamp(1rem, 2vw, 1.8rem);
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--element-gap);
+      }
+
+      .mixer {
+        display: flex;
+        flex-direction: column;
+        gap: var(--element-gap);
+      }
+
+      .mixer-row {
+        display: grid;
+        grid-template-columns: clamp(4.2rem, 9vw, 7rem) minmax(0, 1fr);
+        gap: var(--element-gap);
+        align-items: center;
+        padding: var(--tight-pad);
+        border: 1px solid var(--line-light);
+        border-radius: var(--radius-sm);
+        background: rgba(255, 255, 255, 0.06);
+      }
+
+      .meter {
+        height: clamp(0.42rem, 0.9vw, 0.72rem);
+        border-radius: 999px;
+        overflow: hidden;
+        background: rgba(255, 255, 255, 0.12);
+      }
+
+      .meter span {
+        display: block;
+        height: 100%;
+        border-radius: inherit;
+        background: linear-gradient(90deg, var(--green), var(--amber));
+      }
+
+      /* ===========================================
+         SLIDE 07: FILE ORGANIZATION
+         Shows why project storage matters after recording.
+         =========================================== */
+      .file-map {
+        display: grid;
+        grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+        gap: var(--content-gap);
+        align-items: center;
+      }
+
+      .folder-tree {
+        border: 1px solid var(--line);
+        border-radius: var(--radius-md);
+        padding: var(--card-pad);
+        background: rgba(255, 255, 255, 0.64);
+        font-size: var(--small-size);
+        font-weight: 700;
+      }
+
+      .tree-row {
+        display: flex;
+        align-items: center;
+        gap: clamp(0.32rem, 0.65vw, 0.55rem);
+        padding: clamp(0.28rem, 0.6vw, 0.5rem);
+        border-radius: var(--radius-sm);
+      }
+
+      .tree-row.final {
+        background: rgba(40, 209, 124, 0.16);
+      }
+
+      .tree-indent {
+        padding-left: clamp(1.1rem, 2vw, 1.8rem);
+      }
+
+      .folder-dot {
+        width: clamp(0.68rem, 1.2vw, 1rem);
+        height: clamp(0.5rem, 0.9vw, 0.74rem);
+        border-radius: clamp(0.08rem, 0.2vw, 0.16rem);
+        background: var(--amber);
+        flex: 0 0 auto;
+      }
+
+      .movie-dot {
+        width: clamp(0.7rem, 1.2vw, 1rem);
+        height: clamp(0.7rem, 1.2vw, 1rem);
+        border-radius: clamp(0.08rem, 0.2vw, 0.16rem);
+        background: var(--green);
+        flex: 0 0 auto;
+      }
+
+      .doc-dot {
+        width: clamp(0.7rem, 1.2vw, 1rem);
+        height: clamp(0.7rem, 1.2vw, 1rem);
+        border-radius: clamp(0.08rem, 0.2vw, 0.16rem);
+        background: var(--blue);
+        flex: 0 0 auto;
+      }
+
+      .file-insight {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: var(--element-gap);
+      }
+
+      .file-insight .card {
+        min-height: clamp(7rem, 19vh, 11rem);
+      }
+
+      /* ===========================================
+         SLIDE 08: AI BREATH CUTS
+         Explains the pacing assistant with a before/after.
+         =========================================== */
+      .breath-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: var(--content-gap);
+        min-height: 0;
+      }
+
+      .script-box {
+        border: 1px solid var(--line-light);
+        border-radius: var(--radius-md);
+        padding: var(--card-pad);
+        background: rgba(255, 255, 255, 0.06);
+        min-height: min(47vh, 27rem);
+        display: flex;
+        flex-direction: column;
+        gap: var(--element-gap);
+      }
+
+      .script-text {
+        font-size: clamp(0.7rem, 1.18vw, 0.98rem);
+        line-height: 1.7;
+        color: rgba(255, 255, 255, 0.72);
+      }
+
+      .script-text mark {
+        background: rgba(255, 179, 71, 0.18);
+        color: var(--amber);
+        border-radius: clamp(0.12rem, 0.24vw, 0.2rem);
+        padding: 0 clamp(0.14rem, 0.3vw, 0.24rem);
+      }
+
+      .legend-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--element-gap);
+      }
+
+      /* ===========================================
+         SLIDE 09: ARCHITECTURE
+         A non-engineer-friendly map of the system.
+         =========================================== */
+      .architecture {
+        display: grid;
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+        gap: var(--element-gap);
+        align-items: stretch;
+      }
+
+      .arch-node {
+        border: 1px solid var(--line);
+        border-radius: var(--radius-md);
+        padding: var(--card-pad);
+        background: rgba(255, 255, 255, 0.62);
+        display: flex;
+        flex-direction: column;
+        gap: var(--element-gap);
+        min-height: clamp(8rem, 24vh, 14rem);
+      }
+
+      .arch-node strong {
+        font-size: var(--small-size);
+        color: rgba(21, 21, 21, 0.62);
+      }
+
+      .arch-node p {
+        font-size: var(--small-size);
+        color: rgba(21, 21, 21, 0.62);
+      }
+
+      .arch-pill {
+        width: fit-content;
+        border-radius: var(--radius-sm);
+        padding: clamp(0.22rem, 0.45vw, 0.38rem) clamp(0.34rem, 0.7vw, 0.6rem);
+        background: var(--ink);
+        color: var(--paper);
+        font-size: var(--micro-size);
+        font-weight: 800;
+      }
+
+      /* ===========================================
+         SLIDE 10: CLOSING
+         Leaves the listener with one clear memory.
+         =========================================== */
+      .closing-layout {
+        display: grid;
+        grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
+        gap: var(--content-gap);
+        align-items: center;
+      }
+
+      .big-quote {
+        font-family: var(--font-display);
+        font-size: clamp(1.45rem, 3.1vw, 2.8rem);
+        font-weight: 900;
+        line-height: 1.16;
+      }
+
+      .big-quote .quote-line,
+      h1 .title-line {
+        display: block;
+      }
+
+      .demo-list {
+        display: flex;
+        flex-direction: column;
+        gap: var(--element-gap);
+      }
+
+      .demo-item {
+        display: grid;
+        grid-template-columns: clamp(2.4rem, 5vw, 4rem) minmax(0, 1fr);
+        gap: var(--element-gap);
+        align-items: center;
+        border: 1px solid var(--line-light);
+        border-radius: var(--radius-md);
+        padding: var(--tight-pad);
+        background: rgba(255, 255, 255, 0.06);
+      }
+
+      .demo-number {
+        width: clamp(2.2rem, 4.5vw, 3.6rem);
+        height: clamp(2.2rem, 4.5vw, 3.6rem);
+        border-radius: 999px;
+        display: grid;
+        place-items: center;
+        background: var(--paper);
+        color: var(--ink);
+        font-weight: 900;
+      }
+
+      /* ===========================================
+         RESPONSIVE LAYOUT ADJUSTMENTS
+         Maintains one-screen fit on narrow and short screens.
+         =========================================== */
+      @media (max-width: 900px) {
+        .hero-grid,
+        .two-col,
+        .mess-grid,
+        .prompter-demo,
+        .capture-layout,
+        .file-map,
+        .closing-layout {
+          grid-template-columns: 1fr;
+        }
+
+        .recording-rig,
+        .capture-screen {
+          min-height: min(38vh, 20rem);
+        }
+
+        .four-col,
+        .architecture {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .flow-line {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .flow-step {
+          min-height: clamp(5.6rem, 14vh, 8rem);
+        }
+      }
+
+      @media (max-width: 640px) {
+        .three-col,
+        .four-col,
+        .breath-grid,
+        .file-insight {
+          grid-template-columns: 1fr;
+        }
+
+        .brand-row {
+          align-items: flex-start;
+        }
+
+        .mess-board {
+          grid-template-columns: 1fr;
+        }
+
+        .script-box:nth-child(1) {
+          display: none;
+        }
+      }
+
+      @media (max-height: 700px) {
+        .lead {
+          font-size: var(--body-size);
+          line-height: 1.44;
+        }
+
+        .block-card,
+        .flow-step,
+        .arch-node,
+        .file-insight .card {
+          min-height: auto;
+        }
+
+        .script-box {
+          min-height: min(42vh, 22rem);
+        }
+      }
+
+      @media (max-height: 600px) {
+        .caption,
+        .flow-step p,
+        .arch-node p,
+        .mess-note p {
+          line-height: 1.28;
+        }
+
+        .hero-tags,
+        .capture-label,
+        .legend-row {
+          gap: clamp(0.18rem, 0.42vw, 0.34rem);
+        }
+      }
+    </style>
+  </head>
+
+  <body>
+    <div class="progress-bar" aria-hidden="true"></div>
+    <nav class="nav-dots" aria-label="幻灯片导航"></nav>
+
+    <main>
+      <!-- ===========================================
+           SLIDE 01: HERO
+           =========================================== -->
+      <section class="slide title-slide" aria-label="CueRecord 标题页">
+        <span class="slide-index">01 / 10</span>
+        <div class="slide-content">
+          <div class="hero-grid">
+            <div class="hero-copy">
+              <div class="brand-row reveal-left">
+                <div class="brand-mark" aria-hidden="true">
+                  <svg viewBox="0 0 1024 1024" width="100%" height="100%" role="img" aria-label="CueRecord logo">
+                    <defs>
+                      <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+                        <stop offset="0%" stop-color="#1C1C1E" />
+                        <stop offset="100%" stop-color="#0A0A0C" />
+                      </linearGradient>
+                      <linearGradient id="accent" x1="0" y1="0" x2="1" y2="1">
+                        <stop offset="0%" stop-color="#7C6AFF" />
+                        <stop offset="100%" stop-color="#4F8BFF" />
+                      </linearGradient>
+                      <clipPath id="roundedBg">
+                        <rect width="1024" height="1024" rx="228" />
+                      </clipPath>
+                    </defs>
+                    <rect width="1024" height="1024" rx="228" fill="url(#bg)" />
+                    <g clip-path="url(#roundedBg)">
+                      <path d="M 172 0 Q 240 0, 240 68 L 240 760 Q 240 840, 320 840 L 704 840 Q 784 840, 784 760 L 784 68 Q 784 0, 852 0 Z" fill="#2A2A2C" />
+                      <text x="512" y="600" font-family="Manrope, sans-serif" font-size="480" font-weight="800" fill="url(#accent)" text-anchor="middle">T</text>
+                    </g>
+                  </svg>
+                </div>
+                <span class="kicker">Native macOS creator tool</span>
+              </div>
+
+              <h1 class="reveal delay-1">
+                <span class="title-line">CueRecord：</span>
+                <span class="title-line">录屏、提词、整理</span>
+                <span class="title-line">一个 Mac App</span>
+              </h1>
+              <p class="lead reveal delay-2">
+                给小白听的版本：它不是“又一个录屏按钮”，而是一个为教程、产品演示、讲课和口播准备的内容生产台。
+              </p>
+              <div class="hero-tags reveal delay-3" aria-label="核心能力">
+                <span class="tag"><span class="dot accent-red"></span>录屏</span>
+                <span class="tag"><span class="dot accent-green"></span>提词跟读</span>
+                <span class="tag"><span class="dot accent-amber"></span>摄像头浮窗</span>
+                <span class="tag"><span class="dot accent-blue"></span>项目化保存</span>
+              </div>
+            </div>
+
+            <div class="recording-rig reveal-scale delay-2" aria-hidden="true">
+              <div class="screen-frame">
+                <div class="camera-bubble"></div>
+              </div>
+              <div class="teleprompter-strip">
+                <div class="script-line mid"></div>
+                <div class="script-line active"></div>
+                <div class="script-line short"></div>
+              </div>
+              <div class="control-row">
+                <div class="control-pill">Display</div>
+                <div class="control-pill">Mic + Audio</div>
+                <div class="control-pill">Export</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===========================================
+           SLIDE 02: WHY THIS EXISTS
+           =========================================== -->
+      <section class="slide light" aria-label="为什么需要 CueRecord">
+        <span class="slide-index">02 / 10</span>
+        <div class="slide-content">
+          <div class="mess-grid">
+            <div class="stack">
+              <span class="kicker reveal-left">The pain</span>
+              <h2 class="reveal delay-1">普通人做一次视频演示，经常像开了五个厨房。</h2>
+              <div class="one-line-answer reveal delay-2">
+                <p class="lead">
+                  CueRecord 的核心想法：不要让创作者在工具之间搬运自己，把“讲什么、怎么讲、录什么、存哪里”串成一条线。
+                </p>
+              </div>
+            </div>
+
+            <div class="mess-board reveal-scale delay-2">
+              <div class="mess-note">
+                <h3>稿子</h3>
+                <p>写在文档里，录的时候还要切窗口。</p>
+              </div>
+              <div class="mess-note">
+                <h3>录屏</h3>
+                <p>全屏、窗口、区域、外接屏来回设置。</p>
+              </div>
+              <div class="mess-note">
+                <h3>声音</h3>
+                <p>麦克风、系统音、摄像头经常不同步。</p>
+              </div>
+              <div class="mess-note">
+                <h3>文件</h3>
+                <p>录完以后找素材、找最终片、找草稿。</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===========================================
+           SLIDE 03: PRODUCT MODEL
+           =========================================== -->
+      <section class="slide" aria-label="四个积木解释 CueRecord">
+        <span class="slide-index">03 / 10</span>
+        <div class="slide-content">
+          <div class="stack">
+            <span class="kicker reveal-left">Simple mental model</span>
+            <h2 class="reveal delay-1">可以把它理解成四块积木。</h2>
+            <div class="four-col reveal delay-2">
+              <article class="card block-card">
+                <div class="block-icon">稿</div>
+                <h3>脚本工作台</h3>
+                <p class="caption">用项目和 Markdown 页面管理每段讲稿，也能导入 PPT 演讲者备注。</p>
+              </article>
+              <article class="card block-card">
+                <div class="block-icon">词</div>
+                <h3>智能提词器</h3>
+                <p class="caption">文字不是按固定速度滚，而是根据你正在说的话跟着走。</p>
+              </article>
+              <article class="card block-card">
+                <div class="block-icon">录</div>
+                <h3>录制控制台</h3>
+                <p class="caption">屏幕、窗口、区域、摄像头、麦克风、系统音都在一个地方配置。</p>
+              </article>
+              <article class="card block-card">
+                <div class="block-icon">夹</div>
+                <h3>项目文件夹</h3>
+                <p class="caption">最终视频留在项目里，原始素材自动收进 raw_data，不乱飞。</p>
+              </article>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===========================================
+           SLIDE 04: USER FLOW
+           =========================================== -->
+      <section class="slide" aria-label="一次使用流程">
+        <span class="slide-index">04 / 10</span>
+        <div class="slide-content">
+          <div class="stack">
+            <span class="kicker reveal-left">One session</span>
+            <h2 class="reveal delay-1">一次完整使用，大概是这 5 步。</h2>
+            <div class="flow-line reveal delay-2">
+              <article class="flow-step">
+                <div class="flow-number">1</div>
+                <h3>建项目</h3>
+                <p>每个视频主题一个文件夹，稿子、素材、成片都归到这里。</p>
+                <span class="flow-arrow">→</span>
+              </article>
+              <article class="flow-step">
+                <div class="flow-number">2</div>
+                <h3>写稿</h3>
+                <p>直接写 Markdown，或把 PPT 的演讲者备注拖进来。</p>
+                <span class="flow-arrow">→</span>
+              </article>
+              <article class="flow-step">
+                <div class="flow-number">3</div>
+                <h3>断句</h3>
+                <p>AI 帮你把长句切成适合朗读的节奏。</p>
+                <span class="flow-arrow">→</span>
+              </article>
+              <article class="flow-step">
+                <div class="flow-number">4</div>
+                <h3>录制</h3>
+                <p>选屏幕范围、摄像头浮窗、麦克风和系统音。</p>
+                <span class="flow-arrow">→</span>
+              </article>
+              <article class="flow-step">
+                <div class="flow-number">5</div>
+                <h3>收片</h3>
+                <p>最终视频在外层，原始素材自动进 raw_data。</p>
+              </article>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===========================================
+           SLIDE 05: SMART TELEPROMPTER
+           =========================================== -->
+      <section class="slide light" aria-label="智能提词器">
+        <span class="slide-index">05 / 10</span>
+        <div class="slide-content">
+          <div class="prompter-demo">
+            <div class="stack">
+              <span class="kicker reveal-left">Not a timer</span>
+              <h2 class="reveal delay-1">提词器最重要的不是“滚动”，而是“知道你讲到哪”。</h2>
+              <p class="lead reveal delay-2">
+                CueRecord 内置本地语音识别模型，听到你说的话后，用模糊匹配找回稿子里的位置。说快一点、慢一点、漏几个字，都还能跟上。
+              </p>
+            </div>
+
+            <div class="reader-panel reveal-scale delay-2">
+              <div class="reader-line">今天我们看一个常见问题：</div>
+              <div class="reader-line current">录屏时，稿子、摄像头、声音，经常分散在不同工具里。</div>
+              <div class="reader-line">CueRecord 想把这些步骤收进同一个流程。</div>
+              <div class="reader-line">所以你只需要专心把话讲清楚。</div>
+              <div class="asr-pipeline" style="margin-top: var(--element-gap)">
+                <div class="pipeline-item">
+                  <strong>麦克风输入</strong>
+                  <div class="waveform" aria-hidden="true">
+                    <span class="wave-bar"></span>
+                    <span class="wave-bar"></span>
+                    <span class="wave-bar"></span>
+                    <span class="wave-bar"></span>
+                    <span class="wave-bar"></span>
+                  </div>
+                </div>
+                <div class="pipeline-item">
+                  <strong>本地 ASR</strong>
+                  <span>Paraformer zh-en int8</span>
+                </div>
+                <div class="pipeline-item">
+                  <strong>锚点匹配</strong>
+                  <span>连续词 + 容错拼写</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===========================================
+           SLIDE 06: RECORDING CONSOLE
+           =========================================== -->
+      <section class="slide" aria-label="录制能力">
+        <span class="slide-index">06 / 10</span>
+        <div class="slide-content">
+          <div class="capture-layout">
+            <div class="capture-screen reveal-scale" aria-hidden="true">
+              <div class="capture-target target-full"></div>
+              <div class="capture-target target-window"></div>
+              <div class="capture-target target-area"></div>
+              <div class="capture-label">
+                <span class="tag"><span class="dot accent-blue"></span>全屏</span>
+                <span class="tag"><span class="dot accent-amber"></span>窗口</span>
+                <span class="tag"><span class="dot accent-green"></span>区域</span>
+              </div>
+            </div>
+
+            <div class="stack">
+              <span class="kicker reveal-left">Capture</span>
+              <h2 class="reveal delay-1">录制部分面向真实桌面工作流。</h2>
+              <div class="mixer reveal delay-2">
+                <div class="mixer-row">
+                  <strong>屏幕</strong>
+                  <div class="meter"><span style="width: 92%"></span></div>
+                </div>
+                <div class="mixer-row">
+                  <strong>摄像头</strong>
+                  <div class="meter"><span style="width: 58%"></span></div>
+                </div>
+                <div class="mixer-row">
+                  <strong>麦克风</strong>
+                  <div class="meter"><span style="width: 76%"></span></div>
+                </div>
+                <div class="mixer-row">
+                  <strong>系统音</strong>
+                  <div class="meter"><span style="width: 68%"></span></div>
+                </div>
+              </div>
+              <p class="caption reveal delay-3">
+                重点不是“能不能录”，而是把多显示器、区域选择、窗口选择、摄像头浮窗和单轨混音这些录制细节收在同一个控制台里。
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===========================================
+           SLIDE 07: FILE ORGANIZATION
+           =========================================== -->
+      <section class="slide light" aria-label="项目和文件管理">
+        <span class="slide-index">07 / 10</span>
+        <div class="slide-content">
+          <div class="file-map">
+            <div class="stack">
+              <span class="kicker reveal-left">After recording</span>
+              <h2 class="reveal delay-1">录完以后，不应该再去桌面上找文件。</h2>
+              <p class="lead reveal delay-2">
+                CueRecord 用 Vault 和 Project 管理内容。你看到的是干净的最终成片；需要追溯时，原始屏幕、摄像头、叠加信息和指标还在 raw_data 里。
+              </p>
+            </div>
+
+            <div class="stack">
+              <div class="folder-tree reveal-scale delay-2">
+                <div class="tree-row"><span class="folder-dot"></span>Vault</div>
+                <div class="tree-row tree-indent"><span class="folder-dot"></span>产品演示项目</div>
+                <div class="tree-row tree-indent"><span class="doc-dot"></span>01 开场.md</div>
+                <div class="tree-row tree-indent final"><span class="movie-dot"></span>产品演示项目 - 开场.mov</div>
+                <div class="tree-row tree-indent"><span class="folder-dot"></span>raw_data</div>
+                <div class="tree-row tree-indent"><span class="doc-dot"></span>screen.mov / camera.mov / overlay.json</div>
+              </div>
+              <div class="file-insight reveal delay-3">
+                <article class="card">
+                  <h3>对创作者</h3>
+                  <p class="caption">成片清楚、素材不丢、每次录制都跟当前稿子关联。</p>
+                </article>
+                <article class="card">
+                  <h3>对工程</h3>
+                  <p class="caption">后处理、删除、重渲染都能围绕一次 session 精确执行。</p>
+                </article>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===========================================
+           SLIDE 08: AI BREATH CUTS
+           =========================================== -->
+      <section class="slide" aria-label="AI 断句功能">
+        <span class="slide-index">08 / 10</span>
+        <div class="slide-content">
+          <div class="stack">
+            <span class="kicker reveal-left">AI Breath Cuts</span>
+            <h2 class="reveal delay-1">AI 在这里不是替你写稿，而是帮你把稿子变得好读。</h2>
+            <div class="breath-grid reveal delay-2">
+              <article class="script-box">
+                <span class="mini-label">Before</span>
+                <p class="script-text">
+                  CueRecord 把录屏、摄像头、麦克风、系统音和提词器放在一个工作流里，让创作者不用在多个软件之间切换，也不用录完以后到处找素材。
+                </p>
+              </article>
+              <article class="script-box">
+                <span class="mini-label">After</span>
+                <p class="script-text">
+                  CueRecord 把录屏、摄像头、麦克风、系统音 <mark>｜</mark><br />
+                  和提词器放在一个工作流里。<br />
+                  <mark>--</mark>让创作者不用在多个软件之间切换，<br />
+                  <mark>››</mark>也不用录完以后到处找素材。
+                </p>
+                <div class="legend-row">
+                  <span class="tag"><span class="dot accent-amber"></span>｜ 呼吸点</span>
+                  <span class="tag"><span class="dot accent-blue"></span>›› 快读</span>
+                  <span class="tag"><span class="dot accent-red"></span>-- 慢读</span>
+                </div>
+              </article>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===========================================
+           SLIDE 09: ARCHITECTURE
+           =========================================== -->
+      <section class="slide light" aria-label="工程结构">
+        <span class="slide-index">09 / 10</span>
+        <div class="slide-content">
+          <div class="stack">
+            <span class="kicker reveal-left">Under the hood</span>
+            <h2 class="reveal delay-1">如果用小白语言讲架构，它像一条内容流水线。</h2>
+            <div class="architecture reveal delay-2">
+              <article class="arch-node">
+                <span class="arch-pill">SwiftUI</span>
+                <h3>界面层</h3>
+                <p>项目列表、编辑器、设置页和录制面板。</p>
+              </article>
+              <article class="arch-node">
+                <span class="arch-pill">Service</span>
+                <h3>项目层</h3>
+                <p>保存 Markdown、监听 Vault、同步当前页面。</p>
+              </article>
+              <article class="arch-node">
+                <span class="arch-pill">ASR</span>
+                <h3>跟读层</h3>
+                <p>Sherpa ONNX 本地识别，再匹配稿子位置。</p>
+              </article>
+              <article class="arch-node">
+                <span class="arch-pill">Recorder</span>
+                <h3>录制层</h3>
+                <p>屏幕、摄像头、麦克风、系统音统一调度。</p>
+              </article>
+              <article class="arch-node">
+                <span class="arch-pill">Organizer</span>
+                <h3>整理层</h3>
+                <p>最终视频和 raw_data 分层落盘，方便重渲染。</p>
+              </article>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===========================================
+           SLIDE 10: CLOSING
+           =========================================== -->
+      <section class="slide" aria-label="总结">
+        <span class="slide-index">10 / 10</span>
+        <div class="slide-content">
+          <div class="closing-layout">
+            <div class="stack">
+              <span class="kicker reveal-left">Takeaway</span>
+              <p class="big-quote reveal delay-1">
+                <span class="quote-line">CueRecord 解决的不是</span>
+                <span class="quote-line">“怎么录屏”，</span>
+                <span class="quote-line">而是“怎么顺畅地</span>
+                <span class="quote-line">把一次讲解录成作品”。</span>
+              </p>
+              <p class="lead reveal delay-2">
+                对小白来说，记住一句话就够了：它把录制前、录制中、录制后的杂事，收进一个创作者工作台。
+              </p>
+            </div>
+
+            <div class="demo-list reveal-scale delay-2">
+              <article class="demo-item">
+                <div class="demo-number">1</div>
+                <div>
+                  <h3>看提词器是否跟人走</h3>
+                  <p class="caption">这是区别于普通滚动字幕的关键。</p>
+                </div>
+              </article>
+              <article class="demo-item">
+                <div class="demo-number">2</div>
+                <div>
+                  <h3>看录制控制是否集中</h3>
+                  <p class="caption">屏幕、摄像头、声音不再分散。</p>
+                </div>
+              </article>
+              <article class="demo-item">
+                <div class="demo-number">3</div>
+                <div>
+                  <h3>看文件是否自动归位</h3>
+                  <p class="caption">最终成片和原始素材各回各家。</p>
+                </div>
+              </article>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <script>
+      /* ===========================================
+         SLIDE PRESENTATION CONTROLLER
+         Handles navigation, progress, reveal states, wheel, and touch.
+         =========================================== */
+      class SlidePresentation {
+        constructor() {
+          this.slides = Array.from(document.querySelectorAll(".slide"));
+          this.currentSlide = 0;
+          this.isScrolling = false;
+          this.touchStartY = 0;
+          this.progressBar = document.querySelector(".progress-bar");
+          this.navDotsContainer = document.querySelector(".nav-dots");
+
+          this.setupIntersectionObserver();
+          this.setupKeyboardNav();
+          this.setupWheelNav();
+          this.setupTouchNav();
+          this.setupNavDots();
+          this.updateProgress();
+          this.goToSlide(0, false);
+        }
+
+        setupIntersectionObserver() {
+          const observer = new IntersectionObserver(
+            entries => {
+              entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                  entry.target.classList.add("visible");
+                  this.currentSlide = this.slides.indexOf(entry.target);
+                  this.updateProgress();
+                  this.updateNavDots();
+                }
+              });
+            },
+            { threshold: 0.55 }
+          );
+
+          this.slides.forEach(slide => observer.observe(slide));
+        }
+
+        setupKeyboardNav() {
+          document.addEventListener("keydown", event => {
+            const nextKeys = ["ArrowDown", "ArrowRight", " ", "PageDown"];
+            const prevKeys = ["ArrowUp", "ArrowLeft", "PageUp"];
+
+            if (nextKeys.includes(event.key)) {
+              event.preventDefault();
+              this.nextSlide();
+            }
+
+            if (prevKeys.includes(event.key)) {
+              event.preventDefault();
+              this.prevSlide();
+            }
+
+            if (event.key === "Home") {
+              event.preventDefault();
+              this.goToSlide(0);
+            }
+
+            if (event.key === "End") {
+              event.preventDefault();
+              this.goToSlide(this.slides.length - 1);
+            }
+          });
+        }
+
+        setupWheelNav() {
+          window.addEventListener(
+            "wheel",
+            event => {
+              if (Math.abs(event.deltaY) < 18 || this.isScrolling) return;
+              event.preventDefault();
+              event.deltaY > 0 ? this.nextSlide() : this.prevSlide();
+            },
+            { passive: false }
+          );
+        }
+
+        setupTouchNav() {
+          window.addEventListener(
+            "touchstart",
+            event => {
+              this.touchStartY = event.touches[0].clientY;
+            },
+            { passive: true }
+          );
+
+          window.addEventListener(
+            "touchend",
+            event => {
+              const delta = this.touchStartY - event.changedTouches[0].clientY;
+              if (Math.abs(delta) < 42) return;
+              delta > 0 ? this.nextSlide() : this.prevSlide();
+            },
+            { passive: true }
+          );
+        }
+
+        setupNavDots() {
+          this.navDotsContainer.innerHTML = "";
+          this.slides.forEach((slide, index) => {
+            const button = document.createElement("button");
+            button.className = "nav-dot";
+            button.type = "button";
+            button.setAttribute("aria-label", `跳到第 ${index + 1} 页`);
+            button.addEventListener("click", () => this.goToSlide(index));
+            this.navDotsContainer.appendChild(button);
+          });
+          this.updateNavDots();
+        }
+
+        nextSlide() {
+          this.goToSlide(Math.min(this.currentSlide + 1, this.slides.length - 1));
+        }
+
+        prevSlide() {
+          this.goToSlide(Math.max(this.currentSlide - 1, 0));
+        }
+
+        goToSlide(index, smooth = true) {
+          const target = this.slides[index];
+          if (!target) return;
+
+          this.isScrolling = true;
+          this.currentSlide = index;
+          target.scrollIntoView({ behavior: smooth ? "smooth" : "auto", block: "start" });
+          this.updateProgress();
+          this.updateNavDots();
+
+          window.setTimeout(() => {
+            this.isScrolling = false;
+          }, 620);
+        }
+
+        updateProgress() {
+          const percent = ((this.currentSlide + 1) / this.slides.length) * 100;
+          this.progressBar.style.width = `${percent}%`;
+        }
+
+        updateNavDots() {
+          const dots = this.navDotsContainer.querySelectorAll(".nav-dot");
+          dots.forEach((dot, index) => {
+            dot.classList.toggle("active", index === this.currentSlide);
+            dot.setAttribute("aria-current", index === this.currentSlide ? "true" : "false");
+          });
+        }
+      }
+
+      new SlidePresentation();
+    </script>
+  </body>
+</html>
