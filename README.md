@@ -12,8 +12,8 @@ It combines high-resolution screen recording, optional camera overlay, microphon
 
 Download the latest signed and notarized macOS build:
 
-- [Download CueRecord-v2.0.0.dmg](https://github.com/nolangz/CueRecord/releases/download/v2.0.0/CueRecord-v2.0.0.dmg)
-- [Release notes](https://github.com/nolangz/CueRecord/releases/tag/v2.0.0)
+- [Download CueRecord-v2.0.1.dmg](https://github.com/nolangz/CueRecord/releases/download/v2.0.1/CueRecord-v2.0.1.dmg)
+- [Release notes](https://github.com/nolangz/CueRecord/releases/tag/v2.0.1)
 
 ## Features
 
@@ -117,6 +117,10 @@ build.sh                  Signed, notarized release DMG build script
 - Final exported recordings are designed to contain a single mixed audio track.
 - Intermediate screen, camera, overlay metadata, and metrics files are kept under `raw_data/`.
 - Large bundled assets are tracked with Git LFS and are required for a complete local build.
+
+## License
+
+CueRecord is released under the [Apache License 2.0](LICENSE).
 
 ## Vibe Creators
 
