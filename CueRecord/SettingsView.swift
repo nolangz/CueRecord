@@ -1121,7 +1121,7 @@ struct SettingsView: View {
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
                     Spacer()
-                    Text("\(Int(settings.customBackgroundImageOpacity * 100))%")
+                    Text(percentText(settings.customBackgroundImageOpacity))
                         .font(.system(size: 11, weight: .regular, design: .monospaced))
                         .foregroundStyle(.tertiary)
                 }
@@ -1132,12 +1132,77 @@ struct SettingsView: View {
                     step: 0.05
                 )
             }
+
+            Divider()
+
+            customImageAdjustmentSlider(
+                title: "Image Scale",
+                value: $settings.customBackgroundImageScale,
+                range: 1...3,
+                step: 0.05,
+                valueText: percentText(settings.customBackgroundImageScale)
+            )
+
+            customImageAdjustmentSlider(
+                title: "Horizontal Position",
+                value: $settings.customBackgroundImageHorizontalOffset,
+                range: -0.5...0.5,
+                step: 0.05,
+                valueText: signedPercentText(settings.customBackgroundImageHorizontalOffset)
+            )
+
+            customImageAdjustmentSlider(
+                title: "Vertical Position",
+                value: $settings.customBackgroundImageVerticalOffset,
+                range: -0.5...0.5,
+                step: 0.05,
+                valueText: signedPercentText(settings.customBackgroundImageVerticalOffset)
+            )
+
+            Button {
+                settings.resetCustomBackgroundImageFraming()
+            } label: {
+                Label(t("Reset Image Framing"), systemImage: "arrow.counterclockwise")
+            }
+            .controlSize(.small)
+            .disabled(!settings.hasCustomBackgroundImageFramingAdjustments)
         }
         .padding(10)
         .background(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(Color.primary.opacity(0.04))
         )
+    }
+
+    private func customImageAdjustmentSlider(
+        title: String,
+        value: Binding<Double>,
+        range: ClosedRange<Double>,
+        step: Double,
+        valueText: String
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(t(title))
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text(valueText)
+                    .font(.system(size: 11, weight: .regular, design: .monospaced))
+                    .foregroundStyle(.tertiary)
+            }
+
+            Slider(value: value, in: range, step: step)
+        }
+    }
+
+    private func percentText(_ value: Double) -> String {
+        "\(Int((value * 100).rounded()))%"
+    }
+
+    private func signedPercentText(_ value: Double) -> String {
+        let percent = Int((value * 100).rounded())
+        return percent > 0 ? "+\(percent)%" : "\(percent)%"
     }
 
     @ViewBuilder
@@ -1515,7 +1580,8 @@ struct SettingsView: View {
         settings.cueBrightness = .dim
         settings.audienceFace = .off
         settings.clearCustomBackgroundImage()
-        settings.customBackgroundImageOpacity = 0.24
+        settings.customBackgroundImageOpacity = NotchSettings.defaultCustomBackgroundImageOpacity
+        settings.resetCustomBackgroundImageFraming()
         settings.overlayMode = .pinned
         settings.notchDisplayMode = .followMouse
         settings.pinnedScreenID = 0

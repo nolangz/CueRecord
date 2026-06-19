@@ -365,6 +365,9 @@ struct AudienceFaceBackdropView: View {
 struct CustomTeleprompterBackgroundImageView: View {
     let imageURL: URL?
     let opacity: Double
+    let scale: Double
+    let horizontalOffset: Double
+    let verticalOffset: Double
 
     @State private var image: NSImage?
 
@@ -374,7 +377,14 @@ struct CustomTeleprompterBackgroundImageView: View {
                 Image(nsImage: image)
                     .resizable()
                     .scaledToFill()
-                    .frame(width: geometry.size.width, height: geometry.size.height)
+                    .frame(
+                        width: geometry.size.width * max(scale, 1),
+                        height: geometry.size.height * max(scale, 1)
+                    )
+                    .position(
+                        x: geometry.size.width / 2 + geometry.size.width * horizontalOffset,
+                        y: geometry.size.height / 2 + geometry.size.height * verticalOffset
+                    )
                     .opacity(opacity)
             }
         }
@@ -414,7 +424,10 @@ struct TeleprompterBackdropView: View {
         case .customImage:
             CustomTeleprompterBackgroundImageView(
                 imageURL: settings.customBackgroundImageURL,
-                opacity: settings.customBackgroundImageOpacity
+                opacity: settings.customBackgroundImageOpacity,
+                scale: settings.customBackgroundImageScale,
+                horizontalOffset: settings.customBackgroundImageHorizontalOffset,
+                verticalOffset: settings.customBackgroundImageVerticalOffset
             )
         case .male, .female:
             AudienceFaceBackdropView(
@@ -489,6 +502,18 @@ class NotchSettings {
 
     var customBackgroundImageOpacity: Double {
         didSet { UserDefaults.standard.set(customBackgroundImageOpacity, forKey: "customBackgroundImageOpacity") }
+    }
+
+    var customBackgroundImageScale: Double {
+        didSet { UserDefaults.standard.set(customBackgroundImageScale, forKey: "customBackgroundImageScale") }
+    }
+
+    var customBackgroundImageHorizontalOffset: Double {
+        didSet { UserDefaults.standard.set(customBackgroundImageHorizontalOffset, forKey: "customBackgroundImageHorizontalOffset") }
+    }
+
+    var customBackgroundImageVerticalOffset: Double {
+        didSet { UserDefaults.standard.set(customBackgroundImageVerticalOffset, forKey: "customBackgroundImageVerticalOffset") }
     }
 
     var overlayMode: OverlayMode {
@@ -619,6 +644,12 @@ class NotchSettings {
         customBackgroundImageURL != nil
     }
 
+    var hasCustomBackgroundImageFramingAdjustments: Bool {
+        abs(customBackgroundImageScale - Self.defaultCustomBackgroundImageScale) > 0.0001 ||
+            abs(customBackgroundImageHorizontalOffset - Self.defaultCustomBackgroundImageHorizontalOffset) > 0.0001 ||
+            abs(customBackgroundImageVerticalOffset - Self.defaultCustomBackgroundImageVerticalOffset) > 0.0001
+    }
+
     func setCustomBackgroundImageURL(_ url: URL) {
         customBackgroundImagePath = url.path
         customBackgroundImageBookmark = try? url.bookmarkData(
@@ -634,9 +665,19 @@ class NotchSettings {
         customBackgroundImagePath = ""
     }
 
+    func resetCustomBackgroundImageFraming() {
+        customBackgroundImageScale = Self.defaultCustomBackgroundImageScale
+        customBackgroundImageHorizontalOffset = Self.defaultCustomBackgroundImageHorizontalOffset
+        customBackgroundImageVerticalOffset = Self.defaultCustomBackgroundImageVerticalOffset
+    }
+
     static let defaultWidth: CGFloat = 340
     static let defaultHeight: CGFloat = 150
     static let defaultLocale: String = Locale.current.identifier
+    static let defaultCustomBackgroundImageOpacity = 0.24
+    static let defaultCustomBackgroundImageScale = 1.0
+    static let defaultCustomBackgroundImageHorizontalOffset = 0.0
+    static let defaultCustomBackgroundImageVerticalOffset = 0.0
 
     static let minWidth: CGFloat = 310
     static let maxWidth: CGFloat = 500
@@ -661,7 +702,17 @@ class NotchSettings {
         self.customBackgroundImageBookmark = UserDefaults.standard.data(forKey: Self.customBackgroundImageBookmarkKey)
         self.customBackgroundImagePath = UserDefaults.standard.string(forKey: Self.customBackgroundImagePathKey) ?? ""
         let savedCustomBackgroundImageOpacity = UserDefaults.standard.double(forKey: "customBackgroundImageOpacity")
-        self.customBackgroundImageOpacity = savedCustomBackgroundImageOpacity > 0 ? savedCustomBackgroundImageOpacity : 0.24
+        self.customBackgroundImageOpacity = savedCustomBackgroundImageOpacity > 0 ? savedCustomBackgroundImageOpacity : Self.defaultCustomBackgroundImageOpacity
+        let savedCustomBackgroundImageScale = UserDefaults.standard.double(forKey: "customBackgroundImageScale")
+        self.customBackgroundImageScale = savedCustomBackgroundImageScale > 0 ? savedCustomBackgroundImageScale : Self.defaultCustomBackgroundImageScale
+        self.customBackgroundImageHorizontalOffset =
+            UserDefaults.standard.object(forKey: "customBackgroundImageHorizontalOffset") == nil
+            ? Self.defaultCustomBackgroundImageHorizontalOffset
+            : UserDefaults.standard.double(forKey: "customBackgroundImageHorizontalOffset")
+        self.customBackgroundImageVerticalOffset =
+            UserDefaults.standard.object(forKey: "customBackgroundImageVerticalOffset") == nil
+            ? Self.defaultCustomBackgroundImageVerticalOffset
+            : UserDefaults.standard.double(forKey: "customBackgroundImageVerticalOffset")
         self.overlayMode = OverlayMode(rawValue: UserDefaults.standard.string(forKey: "overlayMode") ?? "") ?? .pinned
         self.notchDisplayMode = NotchDisplayMode(rawValue: UserDefaults.standard.string(forKey: "notchDisplayMode") ?? "") ?? .followMouse
         let savedPinnedScreenID = UserDefaults.standard.integer(forKey: "pinnedScreenID")
