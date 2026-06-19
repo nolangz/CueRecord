@@ -175,10 +175,10 @@ struct ExternalDisplayView: View {
         ZStack {
             Color.black.ignoresSafeArea()
 
-            AudienceFaceBackdropView(
-                face: NotchSettings.shared.audienceFace,
-                opacity: 0.12,
-                verticalPosition: 0.54
+            TeleprompterBackdropView(
+                settings: NotchSettings.shared,
+                audienceFaceOpacity: 0.12,
+                audienceFaceVerticalPosition: 0.54
             )
             .ignoresSafeArea()
 

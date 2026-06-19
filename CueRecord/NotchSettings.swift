@@ -315,7 +315,7 @@ enum ListeningMode: String, CaseIterable, Identifiable {
 // MARK: - Audience Face
 
 enum AudienceFace: String, CaseIterable, Identifiable {
-    case off, male, female
+    case off, male, female, customImage
 
     var id: String { rawValue }
 
@@ -324,12 +324,13 @@ enum AudienceFace: String, CaseIterable, Identifiable {
         case .off: return "Off"
         case .male: return "Male"
         case .female: return "Female"
+        case .customImage: return "Custom Image"
         }
     }
 
     var assetName: String? {
         switch self {
-        case .off: return nil
+        case .off, .customImage: return nil
         case .male: return "AudienceFaceMale"
         case .female: return "AudienceFaceFemale"
         }
@@ -361,11 +362,77 @@ struct AudienceFaceBackdropView: View {
     }
 }
 
+struct CustomTeleprompterBackgroundImageView: View {
+    let imageURL: URL?
+    let opacity: Double
+
+    @State private var image: NSImage?
+
+    var body: some View {
+        GeometryReader { geometry in
+            if let image {
+                Image(nsImage: image)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: geometry.size.width, height: geometry.size.height)
+                    .opacity(opacity)
+            }
+        }
+        .clipped()
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+        .onAppear(perform: loadImage)
+        .onChange(of: imageURL) { _, _ in loadImage() }
+    }
+
+    private func loadImage() {
+        guard let imageURL else {
+            image = nil
+            return
+        }
+
+        let didAccess = imageURL.startAccessingSecurityScopedResource()
+        defer {
+            if didAccess {
+                imageURL.stopAccessingSecurityScopedResource()
+            }
+        }
+
+        image = NSImage(contentsOf: imageURL)
+    }
+}
+
+struct TeleprompterBackdropView: View {
+    @Bindable var settings: NotchSettings
+    var audienceFaceOpacity: Double = 0.18
+    var audienceFaceVerticalPosition: CGFloat = 0.62
+
+    var body: some View {
+        switch settings.audienceFace {
+        case .off:
+            EmptyView()
+        case .customImage:
+            CustomTeleprompterBackgroundImageView(
+                imageURL: settings.customBackgroundImageURL,
+                opacity: settings.customBackgroundImageOpacity
+            )
+        case .male, .female:
+            AudienceFaceBackdropView(
+                face: settings.audienceFace,
+                opacity: audienceFaceOpacity,
+                verticalPosition: audienceFaceVerticalPosition
+            )
+        }
+    }
+}
+
 // MARK: - Settings
 
 @Observable
 class NotchSettings {
     static let shared = NotchSettings()
+    private static let customBackgroundImageBookmarkKey = "customBackgroundImageBookmark"
+    private static let customBackgroundImagePathKey = "customBackgroundImagePath"
 
     var notchWidth: CGFloat {
         didSet { UserDefaults.standard.set(Double(notchWidth), forKey: "notchWidth") }
@@ -404,6 +471,24 @@ class NotchSettings {
 
     var audienceFace: AudienceFace {
         didSet { UserDefaults.standard.set(audienceFace.rawValue, forKey: "audienceFace") }
+    }
+
+    var customBackgroundImageBookmark: Data? {
+        didSet {
+            if let customBackgroundImageBookmark {
+                UserDefaults.standard.set(customBackgroundImageBookmark, forKey: Self.customBackgroundImageBookmarkKey)
+            } else {
+                UserDefaults.standard.removeObject(forKey: Self.customBackgroundImageBookmarkKey)
+            }
+        }
+    }
+
+    var customBackgroundImagePath: String {
+        didSet { UserDefaults.standard.set(customBackgroundImagePath, forKey: Self.customBackgroundImagePathKey) }
+    }
+
+    var customBackgroundImageOpacity: Double {
+        didSet { UserDefaults.standard.set(customBackgroundImageOpacity, forKey: "customBackgroundImageOpacity") }
     }
 
     var overlayMode: OverlayMode {
@@ -509,6 +594,46 @@ class NotchSettings {
         fontFamilyPreset.font(size: fontSizePreset.pointSize)
     }
 
+    var customBackgroundImageURL: URL? {
+        if let customBackgroundImageBookmark {
+            var isStale = false
+            if let url = try? URL(
+                resolvingBookmarkData: customBackgroundImageBookmark,
+                options: [.withSecurityScope],
+                relativeTo: nil,
+                bookmarkDataIsStale: &isStale
+            ) {
+                return url
+            }
+        }
+
+        guard !customBackgroundImagePath.isEmpty else { return nil }
+        return URL(fileURLWithPath: customBackgroundImagePath)
+    }
+
+    var customBackgroundImageDisplayName: String? {
+        customBackgroundImageURL?.lastPathComponent
+    }
+
+    var hasCustomBackgroundImage: Bool {
+        customBackgroundImageURL != nil
+    }
+
+    func setCustomBackgroundImageURL(_ url: URL) {
+        customBackgroundImagePath = url.path
+        customBackgroundImageBookmark = try? url.bookmarkData(
+            options: [.withSecurityScope],
+            includingResourceValuesForKeys: nil,
+            relativeTo: nil
+        )
+        audienceFace = .customImage
+    }
+
+    func clearCustomBackgroundImage() {
+        customBackgroundImageBookmark = nil
+        customBackgroundImagePath = ""
+    }
+
     static let defaultWidth: CGFloat = 340
     static let defaultHeight: CGFloat = 150
     static let defaultLocale: String = Locale.current.identifier
@@ -533,6 +658,10 @@ class NotchSettings {
         self.cueColorPreset = FontColorPreset(rawValue: UserDefaults.standard.string(forKey: "cueColorPreset") ?? "") ?? .white
         self.cueBrightness = CueBrightness(rawValue: UserDefaults.standard.string(forKey: "cueBrightness") ?? "") ?? .dim
         self.audienceFace = AudienceFace(rawValue: UserDefaults.standard.string(forKey: "audienceFace") ?? "") ?? .off
+        self.customBackgroundImageBookmark = UserDefaults.standard.data(forKey: Self.customBackgroundImageBookmarkKey)
+        self.customBackgroundImagePath = UserDefaults.standard.string(forKey: Self.customBackgroundImagePathKey) ?? ""
+        let savedCustomBackgroundImageOpacity = UserDefaults.standard.double(forKey: "customBackgroundImageOpacity")
+        self.customBackgroundImageOpacity = savedCustomBackgroundImageOpacity > 0 ? savedCustomBackgroundImageOpacity : 0.24
         self.overlayMode = OverlayMode(rawValue: UserDefaults.standard.string(forKey: "overlayMode") ?? "") ?? .pinned
         self.notchDisplayMode = NotchDisplayMode(rawValue: UserDefaults.standard.string(forKey: "notchDisplayMode") ?? "") ?? .followMouse
         let savedPinnedScreenID = UserDefaults.standard.integer(forKey: "pinnedScreenID")

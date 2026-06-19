@@ -8,6 +8,7 @@ import SwiftUI
 import AppKit
 import Combine
 import CoreImage.CIFilterBuiltins
+import UniformTypeIdentifiers
 
 // MARK: - Preview Panel Controller
 
@@ -199,7 +200,7 @@ struct NotchPreviewContent: View {
                 .opacity(Double(offsetPhase))
                 .frame(width: currentWidth, height: contentHeight)
 
-                AudienceFaceBackdropView(face: settings.audienceFace, opacity: 0.18)
+                TeleprompterBackdropView(settings: settings, audienceFaceOpacity: 0.18)
                     .frame(width: currentWidth, height: contentHeight)
                     .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
 
@@ -792,7 +793,7 @@ struct SettingsView: View {
 
                 Divider()
 
-                Text(t("Audience Face"))
+                Text(t("Background"))
                     .font(.system(size: 13, weight: .medium))
 
                 Picker("", selection: $settings.audienceFace) {
@@ -803,11 +804,15 @@ struct SettingsView: View {
                 .pickerStyle(.segmented)
                 .labelsHidden()
 
-                Text(t("Shows a semi-transparent curious cartoon face behind the teleprompter text."))
+                Text(teleprompterBackgroundDescription)
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
 
-                audienceFacePreview
+                if settings.audienceFace == .customImage {
+                    customBackgroundImageControls
+                }
+
+                teleprompterBackgroundPreview
 
                 if settings.overlayMode == .pinned {
                     Divider()
@@ -1070,14 +1075,79 @@ struct SettingsView: View {
         .onAppear { refreshScreens() }
     }
 
+    private var teleprompterBackgroundDescription: String {
+        switch settings.audienceFace {
+        case .off:
+            return t("No background is shown behind the teleprompter text.")
+        case .customImage:
+            return t("Use your own image behind the teleprompter text.")
+        case .male, .female:
+            return t("Shows a semi-transparent curious cartoon face behind the teleprompter text.")
+        }
+    }
+
+    private var customBackgroundImageControls: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Button {
+                    chooseCustomBackgroundImage()
+                } label: {
+                    Label(
+                        t(settings.hasCustomBackgroundImage ? "Change Image" : "Choose Image"),
+                        systemImage: "photo"
+                    )
+                }
+                .controlSize(.small)
+
+                if settings.hasCustomBackgroundImage {
+                    Button(role: .destructive) {
+                        settings.clearCustomBackgroundImage()
+                    } label: {
+                        Label(t("Remove Image"), systemImage: "trash")
+                    }
+                    .controlSize(.small)
+                }
+            }
+
+            Text(settings.customBackgroundImageDisplayName ?? t("No image selected."))
+                .font(.system(size: 11))
+                .foregroundStyle(.tertiary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text(t("Background Image Opacity"))
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text("\(Int(settings.customBackgroundImageOpacity * 100))%")
+                        .font(.system(size: 11, weight: .regular, design: .monospaced))
+                        .foregroundStyle(.tertiary)
+                }
+
+                Slider(
+                    value: $settings.customBackgroundImageOpacity,
+                    in: 0.05...0.75,
+                    step: 0.05
+                )
+            }
+        }
+        .padding(10)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color.primary.opacity(0.04))
+        )
+    }
+
     @ViewBuilder
-    private var audienceFacePreview: some View {
+    private var teleprompterBackgroundPreview: some View {
         if settings.audienceFace != .off {
             ZStack {
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
                     .fill(Color.black)
 
-                AudienceFaceBackdropView(face: settings.audienceFace, opacity: 0.26)
+                TeleprompterBackdropView(settings: settings, audienceFaceOpacity: 0.26)
 
                 VStack(alignment: .leading, spacing: 4) {
                     Text(t("Preview"))
@@ -1086,7 +1156,7 @@ struct SettingsView: View {
                     Text(t("Stay curious. Keep reading."))
                         .font(.system(size: 18, weight: .semibold))
                         .foregroundStyle(.white)
-                    Text(t("The face stays below the words."))
+                    Text(settings.audienceFace == .customImage ? t("The image stays behind the words.") : t("The face stays below the words."))
                         .font(.system(size: 12))
                         .foregroundStyle(.white.opacity(0.54))
                 }
@@ -1096,6 +1166,18 @@ struct SettingsView: View {
             .frame(height: 104)
             .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
+    }
+
+    private func chooseCustomBackgroundImage() {
+        let panel = NSOpenPanel()
+        panel.title = t("Choose Background Image")
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = [.image]
+
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        settings.setCustomBackgroundImageURL(url)
     }
 
     // MARK: - Remote Tab
@@ -1432,6 +1514,8 @@ struct SettingsView: View {
         settings.cueColorPreset = .white
         settings.cueBrightness = .dim
         settings.audienceFace = .off
+        settings.clearCustomBackgroundImage()
+        settings.customBackgroundImageOpacity = 0.24
         settings.overlayMode = .pinned
         settings.notchDisplayMode = .followMouse
         settings.pinnedScreenID = 0

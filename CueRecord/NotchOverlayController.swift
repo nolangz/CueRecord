@@ -794,7 +794,7 @@ struct NotchOverlayView: View {
                     .frame(width: currentWidth, height: currentHeight)
                 }
 
-                AudienceFaceBackdropView(face: NotchSettings.shared.audienceFace, opacity: 0.18)
+                TeleprompterBackdropView(settings: NotchSettings.shared, audienceFaceOpacity: 0.18)
                     .frame(width: currentWidth, height: currentHeight)
                     .clipShape(DynamicIslandShape(
                         topInset: currentTopInset,
@@ -1305,7 +1305,7 @@ struct FloatingOverlayView: View {
 
     var body: some View {
         ZStack {
-            AudienceFaceBackdropView(face: NotchSettings.shared.audienceFace, opacity: 0.18)
+            TeleprompterBackdropView(settings: NotchSettings.shared, audienceFaceOpacity: 0.18)
 
             VStack(spacing: 0) {
                 if content.showPagePicker {

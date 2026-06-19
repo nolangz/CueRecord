@@ -4,6 +4,10 @@ CueRecord is a native macOS recording app for screen demos, tutorials, product w
 
 It combines high-resolution screen recording, optional camera overlay, microphone/system audio capture, and a built-in teleprompter workflow in one desktop app.
 
+## Maintenance Note
+
+这是一个已经发布的 project。后续需要改动的时候要非常小心，并测试每一项可能影响的地方。
+
 ## Download
 
 Download the latest signed and notarized macOS build:
