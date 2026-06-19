@@ -374,18 +374,28 @@ struct CustomTeleprompterBackgroundImageView: View {
     var body: some View {
         GeometryReader { geometry in
             if let image {
-                Image(nsImage: image)
-                    .resizable()
-                    .scaledToFill()
-                    .frame(
-                        width: geometry.size.width * max(scale, 1),
-                        height: geometry.size.height * max(scale, 1)
-                    )
-                    .position(
-                        x: geometry.size.width / 2 + geometry.size.width * horizontalOffset,
-                        y: geometry.size.height / 2 + geometry.size.height * verticalOffset
-                    )
-                    .opacity(opacity)
+                ZStack {
+                    Image(nsImage: image)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(
+                            width: geometry.size.width * max(scale, 1),
+                            height: geometry.size.height * max(scale, 1)
+                        )
+                        .position(
+                            x: geometry.size.width / 2 + geometry.size.width * horizontalOffset,
+                            y: geometry.size.height / 2 + geometry.size.height * verticalOffset
+                        )
+
+                    TeleprompterBackgroundImageEdgeShade()
+                        .blendMode(.multiply)
+                        .opacity(0.35)
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                }
+                .frame(width: geometry.size.width, height: geometry.size.height)
+                .mask(TeleprompterBackgroundImageFeatherMask())
+                .opacity(opacity)
             }
         }
         .clipped()
@@ -410,6 +420,105 @@ struct CustomTeleprompterBackgroundImageView: View {
 
         image = NSImage(contentsOf: imageURL)
     }
+}
+
+private struct TeleprompterBackgroundImageFeatherMask: View {
+    var body: some View {
+        GeometryReader { geometry in
+            let horizontalFade = teleprompterBackgroundEdgeFade(
+                for: geometry.size.width,
+                preferredPoints: 36,
+                minimumFraction: 0.05,
+                maximumFraction: 0.18
+            )
+            let verticalFade = teleprompterBackgroundEdgeFade(
+                for: geometry.size.height,
+                preferredPoints: 28,
+                minimumFraction: 0.07,
+                maximumFraction: 0.24
+            )
+
+            Rectangle()
+                .fill(.white)
+                .mask(
+                    LinearGradient(
+                        stops: [
+                            .init(color: .clear, location: 0),
+                            .init(color: .white, location: horizontalFade),
+                            .init(color: .white, location: 1 - horizontalFade),
+                            .init(color: .clear, location: 1)
+                        ],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                )
+                .mask(
+                    LinearGradient(
+                        stops: [
+                            .init(color: .clear, location: 0),
+                            .init(color: .white, location: verticalFade),
+                            .init(color: .white, location: 1 - verticalFade),
+                            .init(color: .clear, location: 1)
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+        }
+    }
+}
+
+private struct TeleprompterBackgroundImageEdgeShade: View {
+    var body: some View {
+        GeometryReader { geometry in
+            let horizontalFade = teleprompterBackgroundEdgeFade(
+                for: geometry.size.width,
+                preferredPoints: 42,
+                minimumFraction: 0.06,
+                maximumFraction: 0.2
+            )
+            let verticalFade = teleprompterBackgroundEdgeFade(
+                for: geometry.size.height,
+                preferredPoints: 32,
+                minimumFraction: 0.08,
+                maximumFraction: 0.26
+            )
+
+            ZStack {
+                LinearGradient(
+                    stops: [
+                        .init(color: .black, location: 0),
+                        .init(color: .clear, location: horizontalFade),
+                        .init(color: .clear, location: 1 - horizontalFade),
+                        .init(color: .black, location: 1)
+                    ],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+
+                LinearGradient(
+                    stops: [
+                        .init(color: .black, location: 0),
+                        .init(color: .clear, location: verticalFade),
+                        .init(color: .clear, location: 1 - verticalFade),
+                        .init(color: .black, location: 1)
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            }
+        }
+    }
+}
+
+private func teleprompterBackgroundEdgeFade(
+    for length: CGFloat,
+    preferredPoints: CGFloat,
+    minimumFraction: CGFloat,
+    maximumFraction: CGFloat
+) -> CGFloat {
+    guard length > 0 else { return maximumFraction }
+    return min(maximumFraction, max(minimumFraction, preferredPoints / length))
 }
 
 struct TeleprompterBackdropView: View {
