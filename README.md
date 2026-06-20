@@ -4,6 +4,14 @@ CueRecord is a native macOS recording app for screen demos, tutorials, product w
 
 It combines high-resolution screen recording, optional camera overlay, microphone/system audio capture, and a built-in teleprompter workflow in one desktop app.
 
+## Nolan Lai
+
+Personal website: [nolanlai.com](https://www.nolanlai.com/)
+
+<img src="docs/assets/nolanlai-slogan-en.png" alt="Tools for creators who'd rather think than fiddle." width="680">
+
+<img src="docs/assets/nolanlai-slogan-zh.png" alt="给更想创作，而不是反复折腾工具的人。" width="680">
+
 ## Maintenance Note
 
 这是一个已经发布的 project。后续需要改动的时候要非常小心，并测试每一项可能影响的地方。
