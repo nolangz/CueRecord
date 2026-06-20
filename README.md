@@ -35,6 +35,10 @@ Download the latest signed and notarized macOS build:
 - Raw recording assets organized under `raw_data/` while the final composited movie stays in the project folder
 - Developer ID signed, notarized, and stapled DMG for distribution
 
+## Credits
+
+The teleprompter portion of CueRecord is based on [f/textream](https://github.com/f/textream).
+
 ## Permissions
 
 CueRecord uses standard macOS privacy permissions:
