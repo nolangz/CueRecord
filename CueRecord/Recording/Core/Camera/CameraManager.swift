@@ -27,6 +27,8 @@ class CameraManager: NSObject, ObservableObject {
     private var deviceObservers: [NSObjectProtocol] = []
     private var refreshWorkItem: DispatchWorkItem?
     private var recordingFrameHandler: ((CameraFrameSample) -> Void)?
+    private var captureGeneration: UInt64 = 0
+    private var activeCameraID: String?
     private static let firstFrameTimeout: TimeInterval = 4.0
     
     override init() {
@@ -132,25 +134,40 @@ class CameraManager: NSObject, ObservableObject {
     // MARK: - 开始摄像头捕获
     func startCapture() async throws {
         guard isAvailable else { return }
-        if isCapturing || isStartingCapture {
-            let receivedFirstFrame = await waitForFirstFrame(timeout: Self.firstFrameTimeout)
-            if !receivedFirstFrame {
-                throw CameraError.firstFrameTimeout
-            }
-            return
+
+        guard let requestedDevice = selectedCaptureDevice() else {
+            throw CameraError.deviceNotFound
         }
 
+        if isCapturing || isStartingCapture {
+            if activeCameraID == requestedDevice.uniqueID {
+                let receivedFirstFrame = await waitForFirstFrame(
+                    timeout: Self.firstFrameTimeout,
+                    generation: captureGeneration
+                )
+                if !receivedFirstFrame {
+                    throw CameraError.firstFrameTimeout
+                }
+                return
+            }
+
+            stopCapture()
+        }
+
+        let generation = nextCaptureGeneration()
         isStartingCapture = true
-        defer { isStartingCapture = false }
+        defer {
+            if captureGeneration == generation {
+                isStartingCapture = false
+            }
+        }
         
         print("📷 启动摄像头捕获...")
         frameBuffer.clear()
         
         // 创建捕获会话
-        captureSession = AVCaptureSession()
-        guard let session = captureSession else {
-            throw CameraError.sessionCreationFailed
-        }
+        let session = AVCaptureSession()
+        captureSession = session
         
         session.beginConfiguration()
         
@@ -160,16 +177,13 @@ class CameraManager: NSObject, ObservableObject {
         }
         
         // 获取选中的摄像头
-        videoDevice = selectedCaptureDevice()
+        videoDevice = requestedDevice
+        activeCameraID = requestedDevice.uniqueID
 
-        guard let device = videoDevice else {
-            throw CameraError.deviceNotFound
-        }
-
-        configureNativeFraming(for: device)
+        configureNativeFraming(for: requestedDevice)
         
         // 创建输入
-        videoInput = try AVCaptureDeviceInput(device: device)
+        videoInput = try AVCaptureDeviceInput(device: requestedDevice)
         guard let input = videoInput else {
             throw CameraError.inputCreationFailed
         }
@@ -186,6 +200,7 @@ class CameraManager: NSObject, ObservableObject {
             throw CameraError.outputCreationFailed
         }
         
+        output.alwaysDiscardsLateVideoFrames = true
         output.setSampleBufferDelegate(self, queue: outputQueue)
         output.videoSettings = [
             kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA
@@ -199,35 +214,49 @@ class CameraManager: NSObject, ObservableObject {
         
         session.commitConfiguration()
         session.startRunning()
+
+        guard captureGeneration == generation else {
+            session.stopRunning()
+            return
+        }
         
         isCapturing = true
-        let receivedFirstFrame = await waitForFirstFrame(timeout: Self.firstFrameTimeout)
+        let receivedFirstFrame = await waitForFirstFrame(timeout: Self.firstFrameTimeout, generation: generation)
         if !receivedFirstFrame {
+            guard captureGeneration == generation else { return }
             stopCapture()
             throw CameraError.firstFrameTimeout
         }
 
         if #available(macOS 12.3, *) {
-            print("📷 Center Stage active: \(device.isCenterStageActive)")
+            print("📷 Center Stage active: \(requestedDevice.isCenterStageActive)")
         }
-        print("✅ 摄像头捕获已启动: \(device.localizedName)")
+        print("✅ 摄像头捕获已启动: \(requestedDevice.localizedName)")
     }
     
     // MARK: - 停止摄像头捕获
     func stopCapture() {
         print("📷 停止摄像头捕获...")
-        
+
+        _ = nextCaptureGeneration()
         captureSession?.stopRunning()
         captureSession = nil
         videoDevice = nil
         videoInput = nil
         videoOutput = nil
+        activeCameraID = nil
         frameBuffer.clear()
         
         isCapturing = false
+        isStartingCapture = false
         print("✅ 摄像头捕获已停止")
     }
-    
+
+    private func nextCaptureGeneration() -> UInt64 {
+        captureGeneration &+= 1
+        return captureGeneration
+    }
+
     // MARK: - 获取当前摄像头画面
     func getCurrentFrame() -> CVPixelBuffer? {
         frameBuffer.currentPixelBuffer
@@ -307,15 +336,16 @@ class CameraManager: NSObject, ObservableObject {
         }
     }
 
-    private func waitForFirstFrame(timeout: TimeInterval) async -> Bool {
+    private func waitForFirstFrame(timeout: TimeInterval, generation: UInt64) async -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
+            guard captureGeneration == generation else { return false }
             if frameBuffer.currentPixelBuffer != nil {
                 return true
             }
             try? await Task.sleep(nanoseconds: 66_000_000)
         }
-        return frameBuffer.currentPixelBuffer != nil
+        return captureGeneration == generation && frameBuffer.currentPixelBuffer != nil
     }
 
     @available(macOS 12.3, *)
@@ -447,6 +477,8 @@ extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
         
         // 更新当前帧
         Task { @MainActor in
+            guard let currentOutput = videoOutput, output === currentOutput else { return }
+
             let hasRecordingConsumer = recordingFrameHandler != nil
             let frame = frameBuffer.push(
                 pixelBuffer: pixelBuffer,
