@@ -1507,13 +1507,20 @@ struct ContentView: View {
                     isShowingPostRecordingOptions = false
                     recordingController.deleteCapturedRecording(capturedOutput)
                 },
-                onExport: { decision in
+                onExport: { decision, exportSettings in
                     isShowingPostRecordingOptions = false
-                    recordingController.renderCapturedRecording(capturedOutput, editDecision: decision)
+                    recordingController.renderCapturedRecording(
+                        capturedOutput,
+                        editDecision: decision,
+                        exportSettings: exportSettings
+                    )
                 },
-                onExportCameraOnly: { _ in
+                onExportCameraOnly: { _, exportSettings in
                     isShowingPostRecordingOptions = false
-                    recordingController.renderPendingCapturedRecording(mode: .cameraOnlyTransparent)
+                    recordingController.renderPendingCapturedRecording(
+                        mode: .cameraOnlyTransparent,
+                        exportSettings: exportSettings
+                    )
                 },
                 onClose: {
                     isShowingPostRecordingOptions = false
@@ -1545,13 +1552,20 @@ struct ContentView: View {
                     isShowingPostRecordingOptions = false
                     recordingController.deletePendingCapturedRecording()
                 },
-                onExport: { decision in
+                onExport: { decision, exportSettings in
                     isShowingPostRecordingOptions = false
-                    recordingController.renderPendingCapturedRecording(editDecision: decision)
+                    recordingController.renderPendingCapturedRecording(
+                        editDecision: decision,
+                        exportSettings: exportSettings
+                    )
                 },
-                onExportCameraOnly: { output in
+                onExportCameraOnly: { output, exportSettings in
                     isShowingPostRecordingOptions = false
-                    recordingController.renderCapturedRecording(output, mode: .cameraOnlyTransparent)
+                    recordingController.renderCapturedRecording(
+                        output,
+                        mode: .cameraOnlyTransparent,
+                        exportSettings: exportSettings
+                    )
                 },
                 onClose: {
                     isShowingPostRecordingOptions = false

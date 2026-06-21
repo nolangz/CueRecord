@@ -12,8 +12,8 @@ final class RecordingEditorWindow: NSObject, NSWindowDelegate {
         controller: RecordingController,
         capturedOutput: CapturedRecordingOutput,
         onDelete: @escaping () -> Void,
-        onExport: @escaping (RecordingEditDecision) -> Void,
-        onExportCameraOnly: @escaping (CapturedRecordingOutput) -> Void,
+        onExport: @escaping (RecordingEditDecision, RecordingExportSettings) -> Void,
+        onExportCameraOnly: @escaping (CapturedRecordingOutput, RecordingExportSettings) -> Void,
         onClose: @escaping () -> Void
     ) {
         if let window {
@@ -31,13 +31,13 @@ final class RecordingEditorWindow: NSObject, NSWindowDelegate {
                 self?.hide()
                 onDelete()
             },
-            onExport: { [weak self] decision in
+            onExport: { [weak self] decision, exportSettings in
                 self?.hide()
-                onExport(decision)
+                onExport(decision, exportSettings)
             },
-            onExportCameraOnly: { [weak self] capturedOutput in
+            onExportCameraOnly: { [weak self] capturedOutput, exportSettings in
                 self?.hide()
-                onExportCameraOnly(capturedOutput)
+                onExportCameraOnly(capturedOutput, exportSettings)
             }
         )
 
@@ -447,17 +447,26 @@ private struct RecordingEditorView: View {
     @ObservedObject var controller: RecordingController
 
     let onDelete: () -> Void
-    let onExport: (RecordingEditDecision) -> Void
-    let onExportCameraOnly: (CapturedRecordingOutput) -> Void
+    let onExport: (RecordingEditDecision, RecordingExportSettings) -> Void
+    let onExportCameraOnly: (CapturedRecordingOutput, RecordingExportSettings) -> Void
 
     @State private var timelineHeight: CGFloat = 260
     @State private var timelineResizeStartHeight: CGFloat?
+    @State private var exportResolutionPreset: RecordingExportResolutionPreset = .p4K
+    @State private var exportBitRatePreset: RecordingExportBitRatePreset = .medium
 
     private let minimumTimelineHeight: CGFloat = 190
     private let maximumTimelineHeight: CGFloat = 380
 
     private func t(_ english: String) -> String {
         interfaceLanguage.text(english)
+    }
+
+    private var exportSettings: RecordingExportSettings {
+        RecordingExportSettings(
+            resolutionPreset: exportResolutionPreset,
+            bitRatePreset: exportBitRatePreset
+        )
     }
 
     var body: some View {
@@ -520,7 +529,7 @@ private struct RecordingEditorView: View {
 
             Button {
                 session.pause()
-                onExport(session.exportDecision)
+                onExport(session.exportDecision, exportSettings)
             } label: {
                 Label(t("Export"), systemImage: "square.and.arrow.up")
             }
@@ -531,7 +540,7 @@ private struct RecordingEditorView: View {
 
             Button {
                 session.pause()
-                onExportCameraOnly(session.capturedOutput)
+                onExportCameraOnly(session.capturedOutput, exportSettings)
             } label: {
                 Label(t("Transparent Camera"), systemImage: "person.crop.rectangle")
             }
@@ -550,6 +559,7 @@ private struct RecordingEditorView: View {
 
                 currentCutSummary
 
+                exportSection
                 modeSection
                 cameraSection
             }
@@ -575,6 +585,52 @@ private struct RecordingEditorView: View {
                 Text("\(timeString(cut.startTime)) - \(timeString(cut.endTime))")
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var exportSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(t("Export Settings"))
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+
+            VStack(alignment: .leading, spacing: 5) {
+                Text(t("Resolution"))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Picker(t("Resolution"), selection: $exportResolutionPreset) {
+                    ForEach(RecordingExportResolutionPreset.allCases) { preset in
+                        Text(t(preset.displayName)).tag(preset)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+            }
+
+            VStack(alignment: .leading, spacing: 5) {
+                Text(t("Bitrate"))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Picker(t("Bitrate"), selection: $exportBitRatePreset) {
+                    ForEach(RecordingExportBitRatePreset.allCases) { preset in
+                        Text(t(preset.displayName)).tag(preset)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+            }
+
+            HStack(spacing: 8) {
+                Label(t("Expected Video Size"), systemImage: "rectangle.dashed")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                Spacer(minLength: 8)
+                Text(exportSettings.outputDimensionsText(for: session.videoSize))
+                    .font(.caption.monospacedDigit().weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
             }
         }
     }

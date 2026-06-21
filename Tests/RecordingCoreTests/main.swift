@@ -175,6 +175,27 @@ func testRecordingPixelFormatPolicy() throws {
     )
 }
 
+func testRecordingExportSettings() throws {
+    let defaultSettings = RecordingExportSettings.default
+    try expect(defaultSettings.resolutionPreset == .p4K, "Default export resolution should be 4K")
+    try expect(defaultSettings.bitRatePreset == .medium, "Default export bitrate should be medium")
+
+    let fiveKSize = CGSize(width: 5120, height: 2880)
+    let defaultOutputSize = defaultSettings.outputSize(for: fiveKSize)
+    try expect(defaultOutputSize == CGSize(width: 3840, height: 2160), "4K export should cap 5K landscape sources at 3840 x 2160")
+    try expect(defaultSettings.outputDimensionsText(for: fiveKSize) == "3840 x 2160", "Expected dimensions text should match the 4K output size")
+
+    let portraitOutputSize = defaultSettings.outputSize(for: CGSize(width: 2880, height: 5120))
+    try expect(portraitOutputSize == CGSize(width: 2160, height: 3840), "4K export should preserve portrait aspect ratio")
+
+    let smallSourceSize = CGSize(width: 1280, height: 720)
+    try expect(defaultSettings.outputSize(for: smallSourceSize) == smallSourceSize, "4K export should not upscale smaller sources")
+
+    let hdSettings = RecordingExportSettings(resolutionPreset: .p1080, bitRatePreset: .low)
+    try expect(hdSettings.outputSize(for: fiveKSize) == CGSize(width: 1920, height: 1080), "1080p export should cap landscape sources at 1920 x 1080")
+    try expect(hdSettings.averageBitRate(for: CGSize(width: 1920, height: 1080)) == 4_147_200, "Low bitrate should scale from output pixels")
+}
+
 func testRecordingArtifactOrganizer() throws {
     let fileManager = FileManager.default
     let root = fileManager.temporaryDirectory
@@ -502,6 +523,7 @@ let tests: [(String, () throws -> Void)] = [
     ("ResolvedRecordingTarget", testResolvedRecordingTarget),
     ("MetricsAndValidator", testMetricsURLAndMissingOutputValidation),
     ("RecordingPixelFormatPolicy", testRecordingPixelFormatPolicy),
+    ("RecordingExportSettings", testRecordingExportSettings),
     ("RecordingArtifactOrganizer", testRecordingArtifactOrganizer),
     ("RecordingArtifactDeletion", testRecordingArtifactDeletion),
     ("CueRecordPathPolicy", testCueRecordPathPolicy),

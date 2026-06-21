@@ -408,25 +408,39 @@ final class RecordingController: ObservableObject {
         CapturedRecordingOutput(discovering: outputURL)
     }
 
-    func renderPendingCapturedRecording(mode: RecordingRenderMode) {
+    func renderPendingCapturedRecording(
+        mode: RecordingRenderMode,
+        exportSettings: RecordingExportSettings = .default
+    ) {
         guard let capturedOutput = pendingCapturedRecording, !isExporting else { return }
-        renderCapturedRecording(capturedOutput, mode: mode)
+        renderCapturedRecording(capturedOutput, mode: mode, exportSettings: exportSettings)
     }
 
-    func renderPendingCapturedRecording(editDecision: RecordingEditDecision) {
-        renderPendingCapturedRecording(mode: .edited(editDecision))
+    func renderPendingCapturedRecording(
+        editDecision: RecordingEditDecision,
+        exportSettings: RecordingExportSettings = .default
+    ) {
+        renderPendingCapturedRecording(mode: .edited(editDecision), exportSettings: exportSettings)
     }
 
-    func renderCapturedRecording(_ capturedOutput: CapturedRecordingOutput, editDecision: RecordingEditDecision) {
-        renderCapturedRecording(capturedOutput, mode: .edited(editDecision))
+    func renderCapturedRecording(
+        _ capturedOutput: CapturedRecordingOutput,
+        editDecision: RecordingEditDecision,
+        exportSettings: RecordingExportSettings = .default
+    ) {
+        renderCapturedRecording(capturedOutput, mode: .edited(editDecision), exportSettings: exportSettings)
     }
 
-    func renderCapturedRecording(_ capturedOutput: CapturedRecordingOutput, mode: RecordingRenderMode) {
+    func renderCapturedRecording(
+        _ capturedOutput: CapturedRecordingOutput,
+        mode: RecordingRenderMode,
+        exportSettings: RecordingExportSettings = .default
+    ) {
         guard !isExporting else { return }
         if pendingCapturedRecording?.outputURL.standardizedFileURL == capturedOutput.outputURL.standardizedFileURL {
             pendingCapturedRecording = nil
         }
-        screenRecorder.renderCapturedRecording(capturedOutput, mode: mode)
+        screenRecorder.renderCapturedRecording(capturedOutput, mode: mode, exportSettings: exportSettings)
     }
 
     func deletePendingCapturedRecording() {

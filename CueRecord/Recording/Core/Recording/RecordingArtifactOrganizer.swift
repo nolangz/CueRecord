@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 
 nonisolated enum RecordingRenderMode: Equatable, Sendable {
@@ -14,6 +15,125 @@ nonisolated enum RecordingRenderMode: Equatable, Sendable {
         case .edited:
             return "Rendering edit"
         }
+    }
+}
+
+nonisolated enum RecordingExportResolutionPreset: String, CaseIterable, Identifiable, Sendable {
+    case p720
+    case p1080
+    case p4K
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .p720:
+            return "720p"
+        case .p1080:
+            return "1080p"
+        case .p4K:
+            return "4K"
+        }
+    }
+
+    private var maxLongEdge: CGFloat {
+        switch self {
+        case .p720:
+            return 1280
+        case .p1080:
+            return 1920
+        case .p4K:
+            return 3840
+        }
+    }
+
+    func outputSize(for sourceSize: CGSize) -> CGSize {
+        let sourceWidth = max(abs(sourceSize.width), 2)
+        let sourceHeight = max(abs(sourceSize.height), 2)
+        let sourceLongEdge = max(sourceWidth, sourceHeight)
+        let scale = sourceLongEdge > maxLongEdge ? maxLongEdge / sourceLongEdge : 1
+
+        return CGSize(
+            width: Self.evenPixelDimension(sourceWidth * scale),
+            height: Self.evenPixelDimension(sourceHeight * scale)
+        )
+    }
+
+    private static func evenPixelDimension(_ value: CGFloat) -> Int {
+        max(2, Int(value.rounded(.toNearestOrAwayFromZero)) / 2 * 2)
+    }
+}
+
+nonisolated enum RecordingExportBitRatePreset: String, CaseIterable, Identifiable, Sendable {
+    case low
+    case medium
+    case high
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .low:
+            return "Low"
+        case .medium:
+            return "Medium"
+        case .high:
+            return "High"
+        }
+    }
+
+    var compressionQuality: Double {
+        switch self {
+        case .low:
+            return 0.76
+        case .medium:
+            return 0.86
+        case .high:
+            return 0.94
+        }
+    }
+
+    func averageBitRate(for outputSize: CGSize) -> Int {
+        let totalPixels = max(Int(outputSize.width * outputSize.height), 1)
+        let bitsPerPixel: Double
+        let minimumBitRate: Int
+
+        switch self {
+        case .low:
+            bitsPerPixel = 2.0
+            minimumBitRate = 2_500_000
+        case .medium:
+            bitsPerPixel = 3.0
+            minimumBitRate = 4_000_000
+        case .high:
+            bitsPerPixel = 5.0
+            minimumBitRate = 8_000_000
+        }
+
+        return max(minimumBitRate, Int(Double(totalPixels) * bitsPerPixel))
+    }
+}
+
+nonisolated struct RecordingExportSettings: Equatable, Sendable {
+    var resolutionPreset: RecordingExportResolutionPreset
+    var bitRatePreset: RecordingExportBitRatePreset
+
+    static let `default` = RecordingExportSettings(
+        resolutionPreset: .p4K,
+        bitRatePreset: .medium
+    )
+
+    func outputSize(for sourceSize: CGSize) -> CGSize {
+        resolutionPreset.outputSize(for: sourceSize)
+    }
+
+    func averageBitRate(for outputSize: CGSize) -> Int {
+        bitRatePreset.averageBitRate(for: outputSize)
+    }
+
+    func outputDimensionsText(for sourceSize: CGSize) -> String {
+        let outputSize = outputSize(for: sourceSize)
+        return "\(Int(outputSize.width)) x \(Int(outputSize.height))"
     }
 }
 
