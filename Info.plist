@@ -4,6 +4,18 @@
 <dict>
 	<key>ATSApplicationFontsPath</key>
 	<string>.</string>
+	<key>LSEnvironment</key>
+	<dict>
+		<!-- Workaround for a Swift 6 / macOS 26 concurrency runtime crash.
+		     When a display/audio route changes (e.g. connecting a Studio Display),
+		     `swift_task_isCurrentExecutorImpl` can be handed a corrupted
+		     SerialExecutorRef and crash (EXC_BAD_ACCESS) instead of returning,
+		     while SwiftUI dispatches a Button gesture through
+		     `MainActor.assumeIsolated`. Forcing the legacy, non-crashing executor
+		     check restores the pre-Swift-6 behavior and avoids the crash. -->
+		<key>SWIFT_IS_CURRENT_EXECUTOR_LEGACY_MODE_OVERRIDE</key>
+		<string>nocrash</string>
+	</dict>
 	<key>NSAudioCaptureUsageDescription</key>
 	<string>CueRecord needs to capture system audio when recording your screen.</string>
 	<key>NSCameraUsageDescription</key>
