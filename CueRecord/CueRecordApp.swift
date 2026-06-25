@@ -116,6 +116,17 @@ struct CueRecordApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @StateObject private var interfaceLanguage = InterfaceLanguageSettings.shared
 
+    init() {
+        // Belt-and-suspenders for a Swift 6 / macOS 26 concurrency runtime crash.
+        // The primary fix is the LSEnvironment entry in Info.plist; this also sets
+        // the flag from code in case the app is launched on a path that bypasses
+        // LaunchServices. Forcing the legacy, non-crashing "is current executor"
+        // check avoids EXC_BAD_ACCESS in swift_task_isCurrentExecutorImpl when a
+        // display/audio route change (e.g. connecting a Studio Display) leaves the
+        // runtime with a corrupted SerialExecutorRef during SwiftUI button dispatch.
+        setenv("SWIFT_IS_CURRENT_EXECUTOR_LEGACY_MODE_OVERRIDE", "nocrash", 0)
+    }
+
     var body: some Scene {
         WindowGroup {
             ContentView()

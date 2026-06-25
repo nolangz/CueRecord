@@ -2,8 +2,9 @@ import Foundation
 import AVFoundation
 
 // MARK: - AVAudioEngine 麦克风录制器
-@MainActor
-class AVAudioEngineRecorder: NSObject {
+// nonisolated：仅 macOS 13-14 麦克风兼容路径使用；全部为 AVAudioEngine/CoreAudio 操作，
+// tap 回调与写盘本就在后台队列，故标记 @unchecked Sendable，可从录制启动链(nonisolated)调用。
+final class AVAudioEngineRecorder: NSObject, @unchecked Sendable {
     private var audioEngine: AVAudioEngine?
     private var inputNode: AVAudioInputNode?
     private var audioFile: AVAudioFile?

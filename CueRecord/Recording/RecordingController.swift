@@ -1,5 +1,7 @@
 import AppKit
+import AVFoundation
 import Combine
+import CoreGraphics
 import Foundation
 
 @MainActor
@@ -23,6 +25,9 @@ final class RecordingController: ObservableObject {
     private var selectedWindowTrackingTimer: Timer?
     private var isPreviewActive = false
     private var pendingStopCompletions: [() -> Void] = []
+    // 录制启动完成回调暂存：detached 编排任务不直接捕获非 Sendable 的 completion 闭包，
+    // 而是通过该属性在 MainActor.run 中回调，避免跨执行器捕获问题。
+    private var pendingStartCompletion: ((Bool) -> Void)?
     private var preparedDisplayID: CGDirectDisplayID?
 
     @Published var isStarting = false
@@ -381,26 +386,26 @@ final class RecordingController: ObservableObject {
         circularCameraWindow?.hide()
         circularCameraWindow = nil
 
-        Task {
-            var didRunStopCompletions = false
-            let runStopCompletionsIfNeeded = { [weak self] in
-                guard !didRunStopCompletions else { return }
-                didRunStopCompletions = true
-                self?.runPendingStopCompletions()
-            }
-
+        // Task.detached：stopRecording(已 nonisolated)的 await 在后台执行器完成，
+        // 主执行器不跨 await 挂起；结果与状态用同步 MainActor.run 更新。
+        Task.detached { [weak self] in
+            guard let self else { return }
+            var captured: CapturedRecordingOutput?
+            var stopError: String?
             do {
-                pendingCapturedRecording = try await screenRecorder.stopRecording()
-                    ?? capturedRecordingOutput(for: expectedOutputURL)
+                captured = try await self.screenRecorder.stopRecording()
             } catch {
-                lastError = error.localizedDescription
-                pendingCapturedRecording = capturedRecordingOutput(for: expectedOutputURL)
+                stopError = error.localizedDescription
             }
-
-            recordingState.stopRecording()
-            isRecording = false
-            isStopping = false
-            runStopCompletionsIfNeeded()
+            await MainActor.run {
+                if let stopError { self.lastError = stopError }
+                self.pendingCapturedRecording = captured
+                    ?? self.capturedRecordingOutput(for: expectedOutputURL)
+                self.recordingState.stopRecording()
+                self.isRecording = false
+                self.isStopping = false
+                self.runPendingStopCompletions()
+            }
         }
     }
 
@@ -485,63 +490,98 @@ final class RecordingController: ObservableObject {
 
         isStarting = true
         lastError = nil
+        pendingStartCompletion = completion
         let displayIDForRecording = requestedDisplayID ?? preparedDisplayID ?? selectedDisplayTarget?.id
 
-        Task {
-            await permissionsManager.checkAllPermissions()
+        // 关键修复(macOS 26.5.1 / Swift 6.3.2 运行时缺陷)：用 Task.detached 在后台执行器
+        // 编排，screenRecorder.startRecording(已 nonisolated)的 await 不在主执行器挂起；
+        // 主线程状态全部用同步 MainActor.run 更新，主执行器永不跨 await 挂起。
+        Task.detached { [weak self] in
+            guard let self else { return }
 
-            guard permissionsManager.screenRecordingAuthorized else {
-                isStarting = false
-                lastError = "Screen recording permission is required."
-                await permissionsManager.requestScreenRecordingPermission()
-                completion?(false)
+            // 屏幕录制权限：同步预检(CGPreflight)，避免在主执行器上 await SCShareableContent。
+            let screenGranted = CGPreflightScreenCaptureAccess()
+            await MainActor.run { self.permissionsManager.screenRecordingAuthorized = screenGranted }
+            guard screenGranted else {
+                await MainActor.run {
+                    self.isStarting = false
+                    self.lastError = "Screen recording permission is required."
+                }
+                // 未授权：走一次性请求流程(会弹系统框，低频路径)。
+                await self.permissionsManager.requestScreenRecordingPermission()
+                await MainActor.run {
+                    self.pendingStartCompletion?(false)
+                    self.pendingStartCompletion = nil
+                }
                 return
             }
 
-            if recordingState.microphoneEnabled && !permissionsManager.microphoneAuthorized {
-                await permissionsManager.requestMicrophonePermission()
+            // 麦克风/摄像头权限：同步读取状态；缺失且需要时按需一次性请求(低频)。
+            let micAuthorized = AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
+            let camAuthorized = AVCaptureDevice.authorizationStatus(for: .video) == .authorized
+            await MainActor.run {
+                self.permissionsManager.microphoneAuthorized = micAuthorized
+                self.permissionsManager.cameraAuthorized = camAuthorized
             }
+            let needMic = await MainActor.run { self.recordingState.microphoneEnabled && !micAuthorized }
+            if needMic { await self.permissionsManager.requestMicrophonePermission() }
+            let needCam = await MainActor.run { self.recordingState.cameraOverlayEnabled && !camAuthorized }
+            if needCam { await self.permissionsManager.requestCameraPermission() }
 
-            if recordingState.cameraOverlayEnabled && !permissionsManager.cameraAuthorized {
-                await permissionsManager.requestCameraPermission()
+            // 在主线程一次性准备录制状态并取出本次配置(同步闭包)。
+            let prep = await MainActor.run { () -> (outputURL: URL, mode: RecordingMode, cameraOverlay: Bool, cameraPosition: CameraOverlayPosition, cameraSize: CameraOverlaySize, systemAudio: Bool, microphone: Bool, micDevice: String?) in
+                if self.recordingState.cameraOverlayEnabled
+                    && AVCaptureDevice.authorizationStatus(for: .video) != .authorized {
+                    self.recordingState.cameraOverlayEnabled = false
+                }
+                if case .selectedWindow = self.recordingState.recordingMode {
+                    _ = self.refreshSelectedWindowTarget()
+                }
+                self.recordingState.startRecording()
+                self.isRecording = true
+                self.startRecordingTimer()
+                return (
+                    self.recordingState.outputURL,
+                    self.recordingState.recordingMode,
+                    self.recordingState.cameraOverlayEnabled,
+                    self.recordingState.cameraOverlayPosition,
+                    self.recordingState.cameraOverlaySize,
+                    self.recordingState.systemAudioEnabled,
+                    self.recordingState.microphoneEnabled,
+                    self.audioManager.getMicrophoneDeviceIDForSCK()
+                )
             }
-
-            if recordingState.cameraOverlayEnabled && !permissionsManager.cameraAuthorized {
-                recordingState.cameraOverlayEnabled = false
-            }
-
-            if case .selectedWindow = recordingState.recordingMode {
-                _ = refreshSelectedWindowTarget()
-            }
-
-            recordingState.startRecording()
-            isRecording = true
-            startRecordingTimer()
 
             do {
-                try await screenRecorder.startRecording(
-                    mode: recordingState.recordingMode,
-                    outputURL: recordingState.outputURL,
-                    cameraOverlay: recordingState.cameraOverlayEnabled,
-                    cameraPosition: recordingState.cameraOverlayPosition,
-                    cameraSize: recordingState.cameraOverlaySize,
-                    systemAudioEnabled: recordingState.systemAudioEnabled,
-                    microphoneEnabled: recordingState.microphoneEnabled,
-                    microphoneDeviceID: audioManager.getMicrophoneDeviceIDForSCK(),
+                try await self.screenRecorder.startRecording(
+                    mode: prep.mode,
+                    outputURL: prep.outputURL,
+                    cameraOverlay: prep.cameraOverlay,
+                    cameraPosition: prep.cameraPosition,
+                    cameraSize: prep.cameraSize,
+                    systemAudioEnabled: prep.systemAudio,
+                    microphoneEnabled: prep.microphone,
+                    microphoneDeviceID: prep.micDevice,
                     displayID: displayIDForRecording
                 )
 
-                showRecordingOverlays()
-                completion?(true)
+                await MainActor.run {
+                    self.showRecordingOverlays()
+                    self.isStarting = false
+                    self.pendingStartCompletion?(true)
+                    self.pendingStartCompletion = nil
+                }
             } catch {
-                recordingState.stopRecording()
-                isRecording = false
-                stopRecordingTimer()
-                lastError = error.localizedDescription
-                completion?(false)
+                await MainActor.run {
+                    self.recordingState.stopRecording()
+                    self.isRecording = false
+                    self.stopRecordingTimer()
+                    self.lastError = error.localizedDescription
+                    self.isStarting = false
+                    self.pendingStartCompletion?(false)
+                    self.pendingStartCompletion = nil
+                }
             }
-
-            isStarting = false
         }
     }
 
@@ -751,18 +791,26 @@ final class RecordingController: ObservableObject {
             self?.recordingState.customCameraOverlayFrame = frame
         }
 
-        Task { @MainActor [weak self] in
-            guard let self, self.isPreviewActive, !self.recordingState.isRecording, !self.screenRecorder.isRecording else { return }
-
-            await self.permissionsManager.checkCameraPermission()
-            guard self.permissionsManager.cameraAuthorized else { return }
-
-            self.cameraManager.refreshCameraDevices()
+        // Task.detached：摄像头启动(已 nonisolated)的 await 在后台执行器完成，
+        // 主执行器不跨 await 挂起；权限同步读取，状态用同步 MainActor.run 更新。
+        Task.detached { [weak self] in
+            guard let self else { return }
+            let camAuthorized = AVCaptureDevice.authorizationStatus(for: .video) == .authorized
+            let proceed = await MainActor.run { () -> Bool in
+                self.permissionsManager.cameraAuthorized = camAuthorized
+                guard camAuthorized,
+                      self.isPreviewActive,
+                      !self.recordingState.isRecording,
+                      !self.screenRecorder.isRecording else { return false }
+                self.cameraManager.refreshCameraDevices()
+                return true
+            }
+            guard proceed else { return }
 
             do {
                 try await self.cameraManager.startCapture()
             } catch {
-                self.lastError = error.localizedDescription
+                await MainActor.run { self.lastError = error.localizedDescription }
             }
         }
     }

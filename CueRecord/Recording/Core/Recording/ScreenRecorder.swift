@@ -5,6 +5,7 @@ import Combine
 import CoreGraphics
 import CoreImage
 import ScreenCaptureKit
+import VideoToolbox
 
 private nonisolated struct CameraOverlayMetadataFile: Codable, Sendable {
     let version: Int
@@ -74,57 +75,85 @@ class ScreenRecorder: NSObject, ObservableObject {
     @Published var isRecording = false
     @Published var canRecord = false
     
-    private var stream: SCStream?
-    private var videoWriterInput: AVAssetWriterInput?
-    private var videoWriter: AVAssetWriter?
-    private var pixelBufferAdapter: AVAssetWriterInputPixelBufferAdaptor?
+    private nonisolated(unsafe) var stream: SCStream?
+    // 以下写盘相关状态由后台串行写盘队列(mediaWriteQueue)访问，故标记 nonisolated(unsafe)。
+    // 它们仅在录制启动前(主线程配置)与停止时(已 stopCapture + 排空队列)被主线程触碰，
+    // 录制进行中只在 mediaWriteQueue 上被访问，串行队列天然保证互斥，无数据竞争。
+    private nonisolated(unsafe) var videoWriterInput: AVAssetWriterInput?
+    private nonisolated(unsafe) var videoWriter: AVAssetWriter?
+    private nonisolated(unsafe) var pixelBufferAdapter: AVAssetWriterInputPixelBufferAdaptor?
 
     // 音频录制组件
-    private var audioWriterInput: AVAssetWriterInput?
-    private var microphoneWriterInput: AVAssetWriterInput?  // macOS 15+ 独立麦克风轨道
-    private var avAudioEngineRecorder: AVAudioEngineRecorder?  // AVAudioEngine录制器
+    private nonisolated(unsafe) var audioWriterInput: AVAssetWriterInput?
+    private nonisolated(unsafe) var microphoneWriterInput: AVAssetWriterInput?  // macOS 15+ 独立麦克风轨道
+    private nonisolated(unsafe) var avAudioEngineRecorder: AVAudioEngineRecorder?  // AVAudioEngine录制器
 
-    private var recordingStartTime: CMTime = .zero
-    private var frameCount: Int64 = 0
-    private var firstVideoFrameTime: CMTime?  // 记录第一帧视频的时间戳
+    private nonisolated(unsafe) var recordingStartTime: CMTime = .zero
+    private nonisolated(unsafe) var frameCount: Int64 = 0
+    private nonisolated(unsafe) var firstVideoFrameTime: CMTime?  // 记录第一帧视频的时间戳
     private let audioStartGate = AudioStartGate()
-    private var pendingAudioBuffers: [PendingAudioSample] = []
+    private nonisolated(unsafe) var pendingAudioBuffers: [PendingAudioSample] = []
     private let recordingMetrics = RecordingMetricsRecorder()
-    private var screenCapturePixelFormat: OSType = kCVPixelFormatType_32BGRA
-    
-    // 录制配置
-    private var outputURL: URL?
-    private var recordingRect: CGRect?
-    private var isFullScreen: Bool = true
-    private var recordingModeName: String = "fullScreen"
-    
-    // 音频录制配置
-    private var systemAudioEnabled: Bool = false
-    private var microphoneEnabled: Bool = false
-    private var microphoneDeviceID: String? = nil
-    
-    // 摄像头叠加层
-    private let cameraManager = CameraManager()
-    private var enableCameraOverlay = false
-    private var cameraOverlayPosition: CameraOverlayPosition = .topRight
-    private var cameraOverlaySize: CameraOverlaySize = .medium
-    private var cameraOverlaySnapshotProvider: (() -> CameraOverlaySnapshot?)?
+    private nonisolated(unsafe) var screenCapturePixelFormat: OSType = kCVPixelFormatType_32BGRA
 
-    // 独立摄像头视频轨
-    private var cameraWriter: AVAssetWriter?
-    private var cameraWriterInput: AVAssetWriterInput?
-    private var cameraPixelBufferAdapter: AVAssetWriterInputPixelBufferAdaptor?
-    private var isCameraTrackRecording = false
-    private var cameraOutputURL: URL?
-    private var overlayMetadataURL: URL?
-    private var cameraOutputDimensions: (width: Int, height: Int)?
-    private var cameraFrameCount: Int64 = 0
+    // 录制配置。启动链路已 de-MainActor(见 startRecording)，这些仅在启动/停止时
+    // 单线程触碰，故标记 nonisolated(unsafe)。
+    private nonisolated(unsafe) var outputURL: URL?
+    private nonisolated(unsafe) var recordingRect: CGRect?
+    private nonisolated(unsafe) var isFullScreen: Bool = true
+    private nonisolated(unsafe) var recordingModeName: String = "fullScreen"
+
+    // 音频录制配置
+    private nonisolated(unsafe) var systemAudioEnabled: Bool = false
+    private nonisolated(unsafe) var microphoneEnabled: Bool = false
+    private nonisolated(unsafe) var microphoneDeviceID: String? = nil
+
+    // 启动时从主线程一次性预取的 AppKit 数据(NSApp/NSScreen)，供 nonisolated 启动链使用，
+    // 避免在后台执行器直接访问主线程隔离的 AppKit API。
+    private nonisolated(unsafe) var startPreflight: StartPreflight?
+
+    struct ScreenInfo: Sendable {
+        let displayID: CGDirectDisplayID
+        let frame: CGRect
+        let scale: CGFloat
+    }
+    struct StartPreflight: Sendable {
+        let appWindowIDs: Set<CGWindowID>
+        let screens: [ScreenInfo]
+        let mainScreenScale: CGFloat
+    }
+    
+    // 摄像头叠加层。cameraManager 在主线程构造；后台路径只调用其 nonisolated 方法
+    // (setRecordingFrameHandler / received/droppedFrameCountValue)。
+    private let cameraManager = CameraManager()
+    private nonisolated(unsafe) var enableCameraOverlay = false
+    private nonisolated(unsafe) var cameraOverlayPosition: CameraOverlayPosition = .topRight
+    private nonisolated(unsafe) var cameraOverlaySize: CameraOverlaySize = .medium
+    private nonisolated(unsafe) var cameraOverlaySnapshotProvider: (() -> CameraOverlaySnapshot?)?
+
+    // 独立摄像头视频轨：写盘相关状态由 cameraWriteQueue（后台串行）访问，
+    // 故标记 nonisolated(unsafe)；启动前/停止后(已排空队列)才由主线程触碰。
+    private nonisolated(unsafe) var cameraWriter: AVAssetWriter?
+    private nonisolated(unsafe) var cameraWriterInput: AVAssetWriterInput?
+    private nonisolated(unsafe) var cameraPixelBufferAdapter: AVAssetWriterInputPixelBufferAdaptor?
+    private nonisolated(unsafe) var isCameraTrackRecording = false
+    private nonisolated(unsafe) var cameraOutputURL: URL?
+    private nonisolated(unsafe) var overlayMetadataURL: URL?
+    private nonisolated(unsafe) var cameraOutputDimensions: (width: Int, height: Int)?
+    private nonisolated(unsafe) var cameraFrameCount: Int64 = 0
     private var postProcessingHandler: (@MainActor (RecordingPostProcessingEvent) -> Void)?
-    private var cameraFirstFrameTime: CMTime?
-    private var overlayMetadataStartTime: CMTime?
-    private var lastCameraElapsedTime: Double?
-    private var overlayMetadataSamples: [CameraOverlayMetadataSample] = []
+    private nonisolated(unsafe) var cameraFirstFrameTime: CMTime?
+    private nonisolated(unsafe) var overlayMetadataStartTime: CMTime?
+    private nonisolated(unsafe) var lastCameraElapsedTime: Double?
+    // 叠加元数据仅在主线程(低频 GCD 回调与停止收尾)读写，串行无竞争。
+    private nonisolated(unsafe) var overlayMetadataSamples: [CameraOverlayMetadataSample] = []
     private let cameraCIContext = CIContext()
+
+    // 专用后台串行写盘队列：所有 SCStream 输出（屏幕/系统音/麦克风）共用它，
+    // 在该队列上同步写盘，不跳主线程、不创建并发 Task。
+    private nonisolated let mediaWriteQueue = DispatchQueue(label: "com.cuerecord.mediaWrite")
+    // 摄像头叠加轨道专用后台串行写盘队列（与屏幕写盘分离，避免互相阻塞）。
+    private nonisolated let cameraWriteQueue = DispatchQueue(label: "com.cuerecord.cameraWrite")
 
     private nonisolated static let screenTargetFrameRate = 60
 
@@ -147,21 +176,23 @@ class ScreenRecorder: NSObject, ObservableObject {
     
     // MARK: - 权限和能力检查
     private func checkCanRecord() {
-        Task {
+        // Task.detached：SCShareableContent 的 await 在后台执行器上完成，
+        // @Published canRecord 用同步 MainActor.run 更新，主执行器不跨 await 挂起。
+        Task.detached {
             do {
-                // 检查ScreenCaptureKit可用性和权限
                 let availableContent = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
-                canRecord = !availableContent.displays.isEmpty
-                print("📺 ScreenCaptureKit 可用: \(canRecord)")
+                let can = !availableContent.displays.isEmpty
+                await MainActor.run { self.canRecord = can }
+                print("📺 ScreenCaptureKit 可用: \(can)")
             } catch {
-                canRecord = false
+                await MainActor.run { self.canRecord = false }
                 print("❌ ScreenCaptureKit 检查失败: \(error)")
             }
         }
     }
     
     // MARK: - 设置摄像头叠加层
-    func setCameraOverlay(enabled: Bool, position: CameraOverlayPosition, size: CameraOverlaySize) {
+    nonisolated func setCameraOverlay(enabled: Bool, position: CameraOverlayPosition, size: CameraOverlaySize) {
         enableCameraOverlay = enabled
         cameraOverlayPosition = position
         cameraOverlaySize = size
@@ -177,7 +208,7 @@ class ScreenRecorder: NSObject, ObservableObject {
     }
     
     // MARK: - 录制控制
-    func startRecording(
+    nonisolated func startRecording(
         mode: RecordingMode, 
         outputURL: URL, 
         cameraOverlay: Bool = false, 
@@ -188,10 +219,29 @@ class ScreenRecorder: NSObject, ObservableObject {
         microphoneDeviceID: String? = nil,
         displayID: CGDirectDisplayID? = nil
     ) async throws {
-        guard canRecord && !isRecording else {
+        // 关键修复(macOS 26.5.1 / Swift 6.3.2 运行时缺陷)：startRecording 改为 nonisolated，
+        // 其内部所有 await(SCShareableContent / stream.startCapture / 摄像头启动)都在后台
+        // 执行器上挂起，主执行器永不跨 await 挂起，从根上避免主执行器引用被打乱后点
+        // SwiftUI 控件崩溃；同时把 5K 内容枚举/启动放后台，治“转圈”。
+        // 一次性预取主线程 @Published 状态与 AppKit(NSApp/NSScreen)数据(同步闭包)。
+        let pre = await MainActor.run { () -> (canRecord: Bool, isRecording: Bool, preflight: StartPreflight) in
+            let appWindowIDs = Set(NSApp.windows.map { CGWindowID($0.windowNumber) }.filter { $0 > 0 })
+            let screens = NSScreen.screens.map { screen in
+                ScreenInfo(
+                    displayID: CGDirectDisplayID(screen.displayID),
+                    frame: screen.frame,
+                    scale: screen.backingScaleFactor
+                )
+            }
+            let mainScale = NSScreen.main?.backingScaleFactor ?? 1.0
+            return (self.canRecord, self.isRecording, StartPreflight(appWindowIDs: appWindowIDs, screens: screens, mainScreenScale: mainScale))
+        }
+
+        guard pre.canRecord && !pre.isRecording else {
             throw RecordingError.invalidState
         }
-        
+        startPreflight = pre.preflight
+
         print("🎬 开始屏幕录制...")
 
         do {
@@ -206,9 +256,9 @@ class ScreenRecorder: NSObject, ObservableObject {
 
             // 启动摄像头（如果需要）
             if enableCameraOverlay {
-                // 重新检查摄像头可用性（权限可能刚被授权）
-                cameraManager.refreshCameraDevices()
-                // 等待一下让权限状态更新
+                // 重新检查摄像头可用性（同步在主线程执行，不跨 await）
+                await MainActor.run { self.cameraManager.refreshCameraDevices() }
+                // 等待一下让权限状态更新（后台执行器上挂起）
                 try await Task.sleep(nanoseconds: 500_000_000) // 0.5秒
                 try await cameraManager.startCapture()
             }
@@ -223,15 +273,18 @@ class ScreenRecorder: NSObject, ObservableObject {
             }
         } catch {
             await cleanupAfterFailedStart()
+            startPreflight = nil
             throw error
         }
-        
-        isRecording = true
+
+        await MainActor.run { self.isRecording = true }
+        startPreflight = nil
         print("✅ 屏幕录制已开始")
     }
     
-    func stopRecording(onCaptureStopped: (() -> Void)? = nil) async throws -> CapturedRecordingOutput? {
-        guard isRecording else { return nil }
+    nonisolated func stopRecording(onCaptureStopped: (@Sendable () -> Void)? = nil) async throws -> CapturedRecordingOutput? {
+        let wasRecording = await MainActor.run { self.isRecording }
+        guard wasRecording else { return nil }
         
         print("⏹️  停止屏幕录制...")
         
@@ -240,6 +293,10 @@ class ScreenRecorder: NSObject, ObservableObject {
             try await stream.stopCapture()
         }
         stream = nil
+
+        // stopCapture 返回后不再有新回调，但队列上可能仍有一帧在写盘，
+        // 排空串行写盘队列，确保 finalize 前所有 append 已完成，避免竞态。
+        mediaWriteQueue.sync { }
         
         // 停止AVAudioEngine录制 (仅macOS 13-14)
         if #available(macOS 15.0, *) {
@@ -257,7 +314,7 @@ class ScreenRecorder: NSObject, ObservableObject {
         // 完成视频写入
         let capturedOutput = await finishVideoWriting()
         
-        isRecording = false
+        await MainActor.run { self.isRecording = false }
         frameCount = 0
         firstVideoFrameTime = nil  // 重置首帧视频时间
 
@@ -287,7 +344,7 @@ class ScreenRecorder: NSObject, ObservableObject {
         try RecordingArtifactOrganizer.deleteArtifacts(for: capturedOutput)
     }
 
-    private func cleanupAfterFailedStart() async {
+    private nonisolated func cleanupAfterFailedStart() async {
         print("🧹 清理录制启动失败后的临时资源")
 
         if let stream {
@@ -320,11 +377,11 @@ class ScreenRecorder: NSObject, ObservableObject {
         pendingAudioBuffers.removeAll()
         frameCount = 0
         firstVideoFrameTime = nil
-        isRecording = false
+        await MainActor.run { self.isRecording = false }
     }
     
     // MARK: - 全屏录制
-    private func startFullScreenRecording(displayID: CGDirectDisplayID?) async throws {
+    private nonisolated func startFullScreenRecording(displayID: CGDirectDisplayID?) async throws {
         print("📺 开始全屏录制...")
         
         let availableContent = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
@@ -353,7 +410,7 @@ class ScreenRecorder: NSObject, ObservableObject {
     }
     
     // MARK: - 区域录制  
-    private func startAreaRecording(rect: CGRect) async throws {
+    private nonisolated func startAreaRecording(rect: CGRect) async throws {
         print("🔍 开始区域录制: \(rect)")
         
         let availableContent = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
@@ -372,7 +429,7 @@ class ScreenRecorder: NSObject, ObservableObject {
     }
 
     // MARK: - 窗口录制
-    private func startWindowRecording(target: WindowRecordingTarget) async throws {
+    private nonisolated func startWindowRecording(target: WindowRecordingTarget) async throws {
         print("🪟 开始窗口录制: \(target.displayName), id: \(target.windowID), frame: \(target.frame)")
 
         let availableContent = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
@@ -390,25 +447,29 @@ class ScreenRecorder: NSObject, ObservableObject {
         try await setupStreamAndWriter(for: display, rect: nil, window: window, availableContent: availableContent)
     }
 
-    private func displayContaining(_ rect: CGRect, in displays: [SCDisplay]) -> SCDisplay? {
+    private nonisolated func displayContaining(_ rect: CGRect, in displays: [SCDisplay]) -> SCDisplay? {
         displays.max { first, second in
             first.frame.intersection(rect).area < second.frame.intersection(rect).area
         }
     }
 
-    private func backingScaleFactor(for rect: CGRect?) -> CGFloat {
+    // nonisolated：使用 startRecording 预取的 NSScreen 数据(startPreflight)，
+    // 不在后台执行器直接访问主线程隔离的 NSScreen。
+    private nonisolated func backingScaleFactor(for rect: CGRect?) -> CGFloat {
+        let screens = startPreflight?.screens ?? []
+        let mainScale = startPreflight?.mainScreenScale ?? 1.0
         guard let rect else {
-            return NSScreen.main?.backingScaleFactor ?? 1.0
+            return mainScale
         }
 
-        return NSScreen.screens
+        return screens
             .max { first, second in
                 first.frame.intersection(rect).area < second.frame.intersection(rect).area
             }?
-            .backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 1.0
+            .scale ?? mainScale
     }
 
-    private func nativeDisplayPixelDimensions(
+    private nonisolated func nativeDisplayPixelDimensions(
         for filter: SCContentFilter,
         display: SCDisplay
     ) -> (width: Int, height: Int, scaleFactor: CGFloat, source: String) {
@@ -423,8 +484,8 @@ class ScreenRecorder: NSObject, ObservableObject {
             }
         }
 
-        if let screen = NSScreen.screens.first(where: { CGDirectDisplayID($0.displayID) == display.displayID }) {
-            let scaleFactor = max(screen.backingScaleFactor, 1)
+        if let screen = (startPreflight?.screens ?? []).first(where: { $0.displayID == display.displayID }) {
+            let scaleFactor = max(screen.scale, 1)
             let width = Self.evenPixelDimension(screen.frame.width * scaleFactor)
             let height = Self.evenPixelDimension(screen.frame.height * scaleFactor)
 
@@ -442,7 +503,7 @@ class ScreenRecorder: NSObject, ObservableObject {
     }
     
     // MARK: - Stream 和 Writer 设置
-    private func setupStreamAndWriter(
+    private nonisolated func setupStreamAndWriter(
         for display: SCDisplay,
         rect: CGRect?,
         window: SCWindow? = nil,
@@ -605,7 +666,7 @@ class ScreenRecorder: NSObject, ObservableObject {
         print("✅ AVAssetWriter 开始写入")
         
         // 添加视频输出回调
-        try stream?.addStreamOutput(self, type: .screen, sampleHandlerQueue: DispatchQueue(label: "videoQueue"))
+        try stream?.addStreamOutput(self, type: .screen, sampleHandlerQueue: mediaWriteQueue)
         
         // 开始捕获
         try await stream?.startCapture()
@@ -628,11 +689,12 @@ class ScreenRecorder: NSObject, ObservableObject {
         print("📹 Stream配置完成 - 分辨率: \(config.width)x\(config.height)")
     }
 
-    private func ownShareableWindows(in availableContent: SCShareableContent?) -> [SCWindow] {
+    private nonisolated func ownShareableWindows(in availableContent: SCShareableContent?) -> [SCWindow] {
         guard let availableContent else { return [] }
 
         let processID = pid_t(ProcessInfo.processInfo.processIdentifier)
-        let appWindowIDs = Set(NSApp.windows.map { CGWindowID($0.windowNumber) }.filter { $0 > 0 })
+        // 使用 startRecording 预取的 NSApp 窗口号(startPreflight)，不在后台访问 NSApp。
+        let appWindowIDs = startPreflight?.appWindowIDs ?? []
 
         return availableContent.windows.filter { window in
             window.owningApplication?.processID == processID || appWindowIDs.contains(window.windowID)
@@ -640,7 +702,7 @@ class ScreenRecorder: NSObject, ObservableObject {
     }
     
     // MARK: - 音频录制设置
-    private func setupAudioCapture(
+    private nonisolated func setupAudioCapture(
         systemAudioEnabled: Bool,
         microphoneEnabled: Bool,
         microphoneDeviceID: String?
@@ -654,7 +716,7 @@ class ScreenRecorder: NSObject, ObservableObject {
         // 设置系统音频录制
         if systemAudioEnabled {
             try setupSystemAudioInput(videoWriter: videoWriter)
-            try stream?.addStreamOutput(self, type: .audio, sampleHandlerQueue: DispatchQueue(label: "audioQueue"))
+            try stream?.addStreamOutput(self, type: .audio, sampleHandlerQueue: mediaWriteQueue)
             print("✅ 系统音频录制已启用")
         }
         
@@ -663,7 +725,7 @@ class ScreenRecorder: NSObject, ObservableObject {
             if #available(macOS 15.0, *) {
                 // macOS 15+: 使用ScreenCaptureKit原生支持
                 try setupMicrophoneInput(videoWriter: videoWriter)
-                try stream?.addStreamOutput(self, type: .microphone, sampleHandlerQueue: DispatchQueue(label: "microphoneQueue"))
+                try stream?.addStreamOutput(self, type: .microphone, sampleHandlerQueue: mediaWriteQueue)
                 print("✅ 麦克风录制已启用 (SCK原生支持)")
             } else {
                 // macOS 13-14: 使用AVAudioEngine
@@ -676,7 +738,7 @@ class ScreenRecorder: NSObject, ObservableObject {
         }
     }
     
-    private func setupSystemAudioInput(videoWriter: AVAssetWriter) throws {
+    private nonisolated func setupSystemAudioInput(videoWriter: AVAssetWriter) throws {
         // 配置系统音频输入
         let audioSettings: [String: Any] = [
             AVFormatIDKey: kAudioFormatMPEG4AAC,
@@ -701,7 +763,7 @@ class ScreenRecorder: NSObject, ObservableObject {
     }
     
     // MARK: - AVAudioEngine麦克风设置
-    private func setupAVAudioEngineMicrophone(videoWriter: AVAssetWriter, deviceID: String?) throws {
+    private nonisolated func setupAVAudioEngineMicrophone(videoWriter: AVAssetWriter, deviceID: String?) throws {
         // 配置麦克风音频输入
         let micSettings: [String: Any] = [
             AVFormatIDKey: kAudioFormatMPEG4AAC,
@@ -736,7 +798,7 @@ class ScreenRecorder: NSObject, ObservableObject {
     }
     
     @available(macOS 15.0, *)
-    private func setupMicrophoneInput(videoWriter: AVAssetWriter) throws {
+    private nonisolated func setupMicrophoneInput(videoWriter: AVAssetWriter) throws {
         // 配置麦克风音频输入（独立轨道）
         let micSettings: [String: Any] = [
             AVFormatIDKey: kAudioFormatMPEG4AAC,
@@ -761,7 +823,7 @@ class ScreenRecorder: NSObject, ObservableObject {
     }
     
     // MARK: - 视频写入器设置
-    private func setupVideoWriter(width: Int, height: Int, outputURL: URL) throws {
+    private nonisolated func setupVideoWriter(width: Int, height: Int, outputURL: URL) throws {
         // 删除已存在的文件
         if FileManager.default.fileExists(atPath: outputURL.path) {
             try FileManager.default.removeItem(at: outputURL)
@@ -812,21 +874,36 @@ class ScreenRecorder: NSObject, ObservableObject {
         print("   总码率: \(bitRate) bps (\(bitRate/1000000) Mbps)")
         print("   模式: \(isFullScreen ? "全屏" : "区域")")
         
+        // 关键修复(Studio Display 5K 全屏崩溃)：H.264 硬件编码器最大宽/高为 4096，
+        // 5120×2880 这类原生 5K 分辨率会让 -[AVAssetWriterInput init...] 直接抛 NSException
+        // 导致 abort()(Swift 的 try/catch 抓不住)。超过 4096 时改用 HEVC(Apple 芯片硬件
+        // 支持到 8K)，否则继续用 H.264 以保持最佳兼容性。
+        let exceedsH264Limit = width > 4096 || height > 4096
+        let codec: AVVideoCodecType = exceedsH264Limit ? .hevc : .h264
+
+        var compressionProperties: [String: Any] = [
+            AVVideoAverageBitRateKey: bitRate,
+            AVVideoMaxKeyFrameIntervalKey: Self.screenTargetFrameRate / 2,
+            AVVideoAllowFrameReorderingKey: false,
+            AVVideoExpectedSourceFrameRateKey: Self.screenTargetFrameRate,
+            AVVideoQualityKey: isFullScreen ? 0.85 : 0.95  // 区域录制使用更高质量
+        ]
+        if exceedsH264Limit {
+            // HEVC：profile 交给系统自动选择；不要带 H.264 专有键(否则又会抛异常)。
+            compressionProperties[AVVideoProfileLevelKey] = kVTProfileLevel_HEVC_Main_AutoLevel
+        } else {
+            compressionProperties[AVVideoProfileLevelKey] = AVVideoProfileLevelH264HighAutoLevel
+            compressionProperties[AVVideoH264EntropyModeKey] = AVVideoH264EntropyModeCABAC
+        }
+
+        print("   编码器: \(exceedsH264Limit ? "HEVC (尺寸超出 H.264 4096 上限)" : "H.264")")
+
         let videoSettings: [String: Any] = [
-            AVVideoCodecKey: AVVideoCodecType.h264,
+            AVVideoCodecKey: codec,
             AVVideoWidthKey: width,
             AVVideoHeightKey: height,
             AVVideoColorPropertiesKey: Self.rec709VideoColorProperties(),
-            AVVideoCompressionPropertiesKey: [
-                AVVideoAverageBitRateKey: bitRate,
-                AVVideoMaxKeyFrameIntervalKey: Self.screenTargetFrameRate / 2,
-                AVVideoProfileLevelKey: AVVideoProfileLevelH264HighAutoLevel,
-                AVVideoAllowFrameReorderingKey: false,
-                AVVideoExpectedSourceFrameRateKey: Self.screenTargetFrameRate,
-                AVVideoH264EntropyModeKey: AVVideoH264EntropyModeCABAC,
-                // 额外的质量参数
-                AVVideoQualityKey: isFullScreen ? 0.85 : 0.95  // 区域录制使用更高质量
-            ]
+            AVVideoCompressionPropertiesKey: compressionProperties
         ]
         
         videoWriterInput = AVAssetWriterInput(mediaType: .video, outputSettings: videoSettings)
@@ -858,7 +935,7 @@ class ScreenRecorder: NSObject, ObservableObject {
     }
 
     // MARK: - 独立摄像头视频轨
-    private func startCameraTrackRecording() {
+    private nonisolated func startCameraTrackRecording() {
         guard !isCameraTrackRecording, let outputURL else { return }
 
         cameraOutputURL = Self.siblingOutputURL(for: outputURL, suffix: "camera", extension: "mov")
@@ -878,14 +955,18 @@ class ScreenRecorder: NSObject, ObservableObject {
         }
 
         isCameraTrackRecording = true
+        // 帧在采集队列回调；转到摄像头专用后台串行队列写盘，全程不跳主执行器。
         cameraManager.setRecordingFrameHandler { [weak self] frame in
-            self?.appendCameraFrame(frame)
+            guard let self else { return }
+            self.cameraWriteQueue.async {
+                self.appendCameraFrame(frame)
+            }
         }
 
         print("📷 独立摄像头视频轨开始: \(cameraOutputURL?.lastPathComponent ?? "")")
     }
 
-    private func appendCameraFrame(_ frame: CameraFrameSample) {
+    private nonisolated func appendCameraFrame(_ frame: CameraFrameSample) {
         guard let videoStartTime = firstVideoFrameTime else { return }
 
         let sourceTime = frame.timestamp.isValid
@@ -928,8 +1009,13 @@ class ScreenRecorder: NSObject, ObservableObject {
             : .zero
         lastCameraElapsedTime = presentationTime.seconds.isFinite ? presentationTime.seconds : lastCameraElapsedTime
 
+        // 叠加元数据采样需读取 UI(叠加层窗口位置)，必须在主线程；用普通 GCD 主队列派发
+        // (低频，约 4 次/秒)，不使用 assumeIsolated，故不触发执行器检查、不污染主执行器。
         if cameraFrameCount % 8 == 0 {
-            captureOverlayMetadataSample(at: lastCameraElapsedTime)
+            let elapsed = lastCameraElapsedTime
+            DispatchQueue.main.async { [weak self] in
+                self?.captureOverlayMetadataSample(at: elapsed)
+            }
         }
 
         guard writerInput.isReadyForMoreMediaData,
@@ -946,16 +1032,16 @@ class ScreenRecorder: NSObject, ObservableObject {
         if adapter.append(outputPixelBuffer, withPresentationTime: presentationTime) {
             cameraFrameCount += 1
             recordingMetrics.updateCamera(
-                received: cameraManager.receivedFrameCount,
+                received: cameraManager.receivedFrameCountValue,
                 written: cameraFrameCount,
-                dropped: cameraManager.droppedFrameCount
+                dropped: cameraManager.droppedFrameCountValue
             )
         } else {
             print("⚠️  摄像头帧写入失败: \(cameraFrameCount)")
         }
     }
 
-    private func setupCameraVideoWriter(width: Int, height: Int) throws {
+    private nonisolated func setupCameraVideoWriter(width: Int, height: Int) throws {
         guard let cameraOutputURL else { return }
 
         cameraWriter = try AVAssetWriter(outputURL: cameraOutputURL, fileType: .mov)
@@ -1008,7 +1094,7 @@ class ScreenRecorder: NSObject, ObservableObject {
         print("📷 摄像头视频写入器配置完成: \(width)x\(height)")
     }
 
-    private func renderCameraFrame(
+    private nonisolated func renderCameraFrame(
         _ image: CIImage,
         sourceExtent: CGRect,
         width: Int,
@@ -1040,9 +1126,12 @@ class ScreenRecorder: NSObject, ObservableObject {
         return outputPixelBuffer
     }
 
-    private func stopCameraTrackRecording() async {
+    private nonisolated func stopCameraTrackRecording() async {
         isCameraTrackRecording = false
         cameraManager.setRecordingFrameHandler(nil)
+
+        // 排空摄像头后台写盘队列，确保所有在途帧写完后再 finalize，避免竞态。
+        cameraWriteQueue.sync { }
 
         captureOverlayMetadataSample(at: lastCameraElapsedTime)
 
@@ -1063,9 +1152,9 @@ class ScreenRecorder: NSObject, ObservableObject {
         }
 
         recordingMetrics.updateCamera(
-            received: cameraManager.receivedFrameCount,
+            received: cameraManager.receivedFrameCountValue,
             written: cameraFrameCount,
-            dropped: cameraManager.droppedFrameCount
+            dropped: cameraManager.droppedFrameCountValue
         )
 
         writeOverlayMetadataFile()
@@ -1080,7 +1169,9 @@ class ScreenRecorder: NSObject, ObservableObject {
         overlayMetadataSamples = []
     }
 
-    private func captureOverlayMetadataSample(at elapsedTime: Double? = nil) {
+    // nonisolated：始终经由 DispatchQueue.main.async 在主线程执行(读取叠加层 UI 安全)，
+    // 但不经 assumeIsolated，避免触碰主执行器检查。
+    private nonisolated func captureOverlayMetadataSample(at elapsedTime: Double? = nil) {
         guard enableCameraOverlay,
               overlayMetadataStartTime != nil,
               let snapshot = cameraOverlaySnapshotProvider?() else {
@@ -1106,7 +1197,7 @@ class ScreenRecorder: NSObject, ObservableObject {
         overlayMetadataSamples.append(sample)
     }
 
-    private func writeOverlayMetadataFile() {
+    private nonisolated func writeOverlayMetadataFile() {
         guard let overlayMetadataURL, let outputURL else { return }
 
         let metadata = CameraOverlayMetadataFile(
@@ -1139,7 +1230,7 @@ class ScreenRecorder: NSObject, ObservableObject {
             .appendingPathExtension(pathExtension)
     }
 
-    private func metadataValue(for shape: CameraOverlayShape) -> String {
+    private nonisolated func metadataValue(for shape: CameraOverlayShape) -> String {
         switch shape {
         case .circle:
             return "circle"
@@ -1150,7 +1241,7 @@ class ScreenRecorder: NSObject, ObservableObject {
         }
     }
 
-    private func metadataValue(for size: CameraOverlaySize) -> String {
+    private nonisolated func metadataValue(for size: CameraOverlaySize) -> String {
         switch size {
         case .small:
             return "small"
@@ -2499,7 +2590,7 @@ class ScreenRecorder: NSObject, ObservableObject {
     }
     
     // MARK: - 完成视频写入
-    private func finishVideoWriting() async -> CapturedRecordingOutput? {
+    private nonisolated func finishVideoWriting() async -> CapturedRecordingOutput? {
         guard let writer = videoWriter else { return nil }
         let completedOutputURL = outputURL
         let completedCameraURL = enableCameraOverlay ? cameraOutputURL : nil
@@ -2554,7 +2645,7 @@ class ScreenRecorder: NSObject, ObservableObject {
         return capturedOutput
     }
 
-    private func writeRecordingMetrics(for outputURL: URL) {
+    private nonisolated func writeRecordingMetrics(for outputURL: URL) {
         let expectedMinimumDuration: TimeInterval
         if frameCount > 0 {
             expectedMinimumDuration = min(0.5, max(0.1, Double(frameCount) / Double(Self.screenTargetFrameRate) * 0.5))
@@ -2726,7 +2817,7 @@ class ScreenRecorder: NSObject, ObservableObject {
     }
 
     // MARK: - 区域保存和恢复
-    private func saveSelectedArea(_ rect: CGRect) {
+    private nonisolated func saveSelectedArea(_ rect: CGRect) {
         let rectDict: [String: Double] = [
             "x": rect.origin.x,
             "y": rect.origin.y,
@@ -2751,20 +2842,31 @@ class ScreenRecorder: NSObject, ObservableObject {
 
 // MARK: - SCStreamOutput
 extension ScreenRecorder: SCStreamOutput {
-    func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
-        Task { @MainActor in
-            switch type {
-            case .screen:
-                await processVideoSampleBuffer(sampleBuffer)
-            case .audio:
-                await processAudioSampleBuffer(sampleBuffer, type: .systemAudio)
-            case .microphone:
-                if #available(macOS 15.0, *) {
-                    await processAudioSampleBuffer(sampleBuffer, type: .microphone)
-                }
-            @unknown default:
-                break
+    nonisolated func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
+        // 关键修复：直接在 SCStream 的后台采样队列（mediaWriteQueue，串行）上写盘。
+        //
+        // 历史实现每帧 `Task { @MainActor in await process... }`，把高频帧（5K Studio
+        // Display 下每秒数十帧）全部跳到主执行器。这有两个致命问题：
+        //   1) 每帧创建 Swift 并发 Task，并且 MainActor.assumeIsolated 内部会调用
+        //      swift_task_isCurrentExecutor —— 正是 macOS 26 / Swift 6 上有缺陷、会
+        //      在主线程任意 SwiftUI 按钮/下拉框点击时读到野指针(0x1)而崩溃的函数。
+        //      高频敲打它会显著加剧该缺陷的触发。
+        //   2) 把 5K 视频写盘压在主线程，导致录制时界面转圈卡死。
+        //
+        // AVAssetWriterInput.append / CMSampleBuffer 操作本身线程安全，无需 MainActor。
+        // 三路输出（屏幕/系统音/麦克风）共用同一条串行队列，天然串行化共享状态，
+        // 既不创建并发任务、也不触碰主执行器，从根本上同时解决“崩溃”和“转圈”。
+        switch type {
+        case .screen:
+            processVideoSampleBuffer(sampleBuffer)
+        case .audio:
+            processAudioSampleBuffer(sampleBuffer, type: .systemAudio)
+        case .microphone:
+            if #available(macOS 15.0, *) {
+                processAudioSampleBuffer(sampleBuffer, type: .microphone)
             }
+        @unknown default:
+            break
         }
     }
 }
@@ -2781,7 +2883,7 @@ extension ScreenRecorder: SCStreamDelegate {
 
 // MARK: - 媒体处理
 extension ScreenRecorder {
-    private func processVideoSampleBuffer(_ sampleBuffer: CMSampleBuffer) async {
+    private nonisolated func processVideoSampleBuffer(_ sampleBuffer: CMSampleBuffer) {
         guard let writer = videoWriter,
               let writerInput = videoWriterInput,
               writer.status == .writing else {
@@ -2830,7 +2932,7 @@ extension ScreenRecorder {
         }
     }
 
-    private func isCompleteScreenFrame(_ sampleBuffer: CMSampleBuffer) -> Bool {
+    private nonisolated func isCompleteScreenFrame(_ sampleBuffer: CMSampleBuffer) -> Bool {
         guard let attachmentsArray = CMSampleBufferGetSampleAttachmentsArray(
             sampleBuffer,
             createIfNecessary: false
@@ -2844,11 +2946,11 @@ extension ScreenRecorder {
         return status == .complete
     }
 
-    private func adjustedVideoSampleBuffer(_ sampleBuffer: CMSampleBuffer, relativeTo firstTime: CMTime) -> CMSampleBuffer? {
+    private nonisolated func adjustedVideoSampleBuffer(_ sampleBuffer: CMSampleBuffer, relativeTo firstTime: CMTime) -> CMSampleBuffer? {
         adjustedSampleBuffer(sampleBuffer, relativeTo: firstTime)
     }
 
-    private func adjustedAudioSampleBuffer(_ sampleBuffer: CMSampleBuffer) -> CMSampleBuffer? {
+    private nonisolated func adjustedAudioSampleBuffer(_ sampleBuffer: CMSampleBuffer) -> CMSampleBuffer? {
         let originalTime = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
         let duration = CMSampleBufferGetDuration(sampleBuffer)
 
@@ -2874,7 +2976,7 @@ extension ScreenRecorder {
         }
     }
 
-    private func adjustedSampleBuffer(
+    private nonisolated func adjustedSampleBuffer(
         _ sampleBuffer: CMSampleBuffer,
         relativeTo offset: CMTime,
         clampNegativeTimestamps: Bool = false
@@ -2944,7 +3046,7 @@ extension ScreenRecorder {
     }
     
     // MARK: - 音频处理
-    private func processAudioSampleBuffer(_ sampleBuffer: CMSampleBuffer, type: AudioType) async {
+    private nonisolated func processAudioSampleBuffer(_ sampleBuffer: CMSampleBuffer, type: AudioType) {
         guard let writer = videoWriter,
               writer.status == .writing else {
             return
@@ -2958,7 +3060,7 @@ extension ScreenRecorder {
         appendAudioSampleBuffer(sampleBuffer, type: type)
     }
 
-    private func queuePendingAudio(_ sampleBuffer: CMSampleBuffer, type: AudioType) {
+    private nonisolated func queuePendingAudio(_ sampleBuffer: CMSampleBuffer, type: AudioType) {
         pendingAudioBuffers.append(PendingAudioSample(sampleBuffer: sampleBuffer, type: type))
         recordingMetrics.incrementQueuedAudioBeforeVideo()
 
@@ -2978,7 +3080,7 @@ extension ScreenRecorder {
         }
     }
 
-    private func flushPendingAudioBuffers() {
+    private nonisolated func flushPendingAudioBuffers() {
         guard !pendingAudioBuffers.isEmpty else { return }
 
         let pending = pendingAudioBuffers
@@ -2988,7 +3090,7 @@ extension ScreenRecorder {
         }
     }
 
-    private func appendAudioSampleBuffer(_ sampleBuffer: CMSampleBuffer, type: AudioType) {
+    private nonisolated func appendAudioSampleBuffer(_ sampleBuffer: CMSampleBuffer, type: AudioType) {
         let writerInput: AVAssetWriterInput?
         
         switch type {
