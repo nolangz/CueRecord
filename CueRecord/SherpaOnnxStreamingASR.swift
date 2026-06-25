@@ -35,9 +35,24 @@ enum SherpaOnnxModelLocator {
     }
 
     static func hasRequiredFiles(in directory: URL) -> Bool {
-        let files = ["tokens.txt", "encoder.int8.onnx", "decoder.int8.onnx"]
-        return files.allSatisfy {
-            FileManager.default.fileExists(atPath: directory.appendingPathComponent($0).path)
+        // The .onnx weights are stored via Git LFS. When a checkout is made
+        // without `git lfs pull`, the files exist as ~130-byte text pointers.
+        // ONNX Runtime then throws an uncaught C++ exception while building the
+        // session, which aborts the whole app. Require a realistic minimum size
+        // so a missing/pointer model surfaces as a recoverable ASRError instead.
+        let requirements: [(name: String, minSize: Int)] = [
+            ("tokens.txt", 1_024),
+            ("encoder.int8.onnx", 1_048_576),
+            ("decoder.int8.onnx", 1_048_576)
+        ]
+        let fileManager = FileManager.default
+        return requirements.allSatisfy { requirement in
+            let path = directory.appendingPathComponent(requirement.name).path
+            guard let attributes = try? fileManager.attributesOfItem(atPath: path),
+                  let size = attributes[.size] as? Int else {
+                return false
+            }
+            return size >= requirement.minSize
         }
     }
 }
