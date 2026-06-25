@@ -15,21 +15,29 @@ class CameraManager: NSObject, ObservableObject {
     @Published var availableCameras: [CameraDevice] = []
     @Published var selectedCameraID = ""
     
-    private var captureSession: AVCaptureSession?
-    private var videoDevice: AVCaptureDevice?
-    private var videoInput: AVCaptureDeviceInput?
-    private var videoOutput: AVCaptureVideoDataOutput?
-    private var outputQueue = DispatchQueue(label: "cameraQueue", qos: .userInteractive)
-    
+    // 采集会话相关状态：由后台(startCapture 的 nonisolated 执行器)与主线程(stopCapture)
+    // 共同访问，故标记 nonisolated(unsafe) 并用 sessionLock 串行化关键区，避免数据竞争。
+    // 关键修复(macOS 26 / Swift 6.3.2 运行时缺陷)：startCapture 不再是 @MainActor，
+    // 其内部的 await(waitForFirstFrame/Task.sleep)发生在后台执行器上，主执行器永不
+    // 跨 await 挂起，从根上避免主执行器引用被打乱后点 SwiftUI 按钮/下拉框崩溃。
+    private nonisolated(unsafe) var captureSession: AVCaptureSession?
+    private nonisolated(unsafe) var videoDevice: AVCaptureDevice?
+    private nonisolated(unsafe) var videoInput: AVCaptureDeviceInput?
+    private nonisolated(unsafe) var videoOutput: AVCaptureVideoDataOutput?
+    private nonisolated let outputQueue = DispatchQueue(label: "cameraQueue", qos: .userInteractive)
+    private nonisolated let sessionLock = NSLock()
+    // 供 nonisolated 控制流读取的"是否正在采集"内部标志(与 @Published isCapturing 同步更新)。
+    private nonisolated(unsafe) var isCapturingInternal = false
+
     private let frameBuffer = CameraFrameBuffer()
-    private var isStartingCapture = false
-    private let ciContext = CIContext()
+    private nonisolated(unsafe) var isStartingCapture = false
+    private nonisolated let ciContext = CIContext()
     private var deviceObservers: [NSObjectProtocol] = []
     private var refreshWorkItem: DispatchWorkItem?
-    private var recordingFrameHandler: ((CameraFrameSample) -> Void)?
-    private var captureGeneration: UInt64 = 0
-    private var activeCameraID: String?
-    private static let firstFrameTimeout: TimeInterval = 4.0
+    private let frameRouter = CameraFrameRouter()
+    private nonisolated(unsafe) var captureGeneration: UInt64 = 0
+    private nonisolated(unsafe) var activeCameraID: String?
+    private nonisolated static let firstFrameTimeout: TimeInterval = 4.0
     
     override init() {
         super.init()
@@ -94,8 +102,11 @@ class CameraManager: NSObject, ObservableObject {
         guard wasCapturing, selectedCameraID != previousSelectedCameraID else { return }
 
         stopCapture()
-        Task { @MainActor [weak self] in
-            guard let self, self.isAvailable else { return }
+        // Task.detached：在后台执行器上 await startCapture，主执行器不跨 await 挂起。
+        Task.detached { [weak self] in
+            guard let self else { return }
+            let available = await MainActor.run { self.isAvailable }
+            guard available else { return }
             do {
                 try await self.startCapture()
             } catch {
@@ -132,14 +143,20 @@ class CameraManager: NSObject, ObservableObject {
     }
     
     // MARK: - 开始摄像头捕获
-    func startCapture() async throws {
-        guard isAvailable else { return }
+    // nonisolated：整段在后台执行器运行，await(waitForFirstFrame)不在主执行器上挂起。
+    // AVCaptureSession 的配置/startRunning 本就建议放后台(startRunning 会阻塞)。
+    nonisolated func startCapture() async throws {
+        // 快照主线程 @Published 状态(同步闭包，主执行器不跨 await)
+        let snapshot = await MainActor.run { () -> (available: Bool, selectedID: String) in
+            (self.isAvailable, self.selectedCameraID)
+        }
+        guard snapshot.available else { return }
 
-        guard let requestedDevice = selectedCaptureDevice() else {
+        guard let requestedDevice = selectedCaptureDevice(selectedID: snapshot.selectedID) else {
             throw CameraError.deviceNotFound
         }
 
-        if isCapturing || isStartingCapture {
+        if isCapturingInternal || isStartingCapture {
             if activeCameraID == requestedDevice.uniqueID {
                 let receivedFirstFrame = await waitForFirstFrame(
                     timeout: Self.firstFrameTimeout,
@@ -161,66 +178,65 @@ class CameraManager: NSObject, ObservableObject {
                 isStartingCapture = false
             }
         }
-        
+
         print("📷 启动摄像头捕获...")
         frameBuffer.clear()
-        
-        // 创建捕获会话
+
+        // 在本地变量上完成所有配置(尚未共享，无需加锁)；慢调用 startRunning() 放在锁外，
+        // 避免主线程上的 stopCapture 因等待本锁而阻塞(否则会再次出现“转圈”)。
         let session = AVCaptureSession()
-        captureSession = session
-        
         session.beginConfiguration()
-        
-        // 设置捕获质量
+
         if session.canSetSessionPreset(.high) {
             session.sessionPreset = .high
         }
-        
-        // 获取选中的摄像头
-        videoDevice = requestedDevice
-        activeCameraID = requestedDevice.uniqueID
 
         configureNativeFraming(for: requestedDevice)
-        
-        // 创建输入
-        videoInput = try AVCaptureDeviceInput(device: requestedDevice)
-        guard let input = videoInput else {
-            throw CameraError.inputCreationFailed
+
+        let input: AVCaptureDeviceInput
+        do {
+            input = try AVCaptureDeviceInput(device: requestedDevice)
+        } catch {
+            throw error
         }
-        
-        if session.canAddInput(input) {
-            session.addInput(input)
-        } else {
+        guard session.canAddInput(input) else {
             throw CameraError.cannotAddInput
         }
-        
-        // 创建输出
-        videoOutput = AVCaptureVideoDataOutput()
-        guard let output = videoOutput else {
-            throw CameraError.outputCreationFailed
-        }
-        
+        session.addInput(input)
+
+        let output = AVCaptureVideoDataOutput()
         output.alwaysDiscardsLateVideoFrames = true
         output.setSampleBufferDelegate(self, queue: outputQueue)
         output.videoSettings = [
             kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA
         ]
-        
-        if session.canAddOutput(output) {
-            session.addOutput(output)
-        } else {
+        guard session.canAddOutput(output) else {
             throw CameraError.cannotAddOutput
         }
-        
+        session.addOutput(output)
         session.commitConfiguration()
+
+        // 仅在锁内做指针赋值(快)，随后锁外 startRunning。
+        sessionLock.lock()
+        captureSession = session
+        videoDevice = requestedDevice
+        videoInput = input
+        videoOutput = output
+        activeCameraID = requestedDevice.uniqueID
+        sessionLock.unlock()
+
+        frameRouter.setActiveOutput(ObjectIdentifier(output))
         session.startRunning()
 
         guard captureGeneration == generation else {
+            frameRouter.setActiveOutput(nil)
             session.stopRunning()
             return
         }
-        
-        isCapturing = true
+
+        isCapturingInternal = true
+        await MainActor.run { self.isCapturing = true }
+
         let receivedFirstFrame = await waitForFirstFrame(timeout: Self.firstFrameTimeout, generation: generation)
         if !receivedFirstFrame {
             guard captureGeneration == generation else { return }
@@ -233,26 +249,37 @@ class CameraManager: NSObject, ObservableObject {
         }
         print("✅ 摄像头捕获已启动: \(requestedDevice.localizedName)")
     }
-    
+
     // MARK: - 停止摄像头捕获
-    func stopCapture() {
+    // nonisolated：可从主线程或 startCapture 的后台执行器调用；不含 await，
+    // @Published 更新通过同步派发回主线程(主执行器不跨 await)。
+    nonisolated func stopCapture() {
         print("📷 停止摄像头捕获...")
 
         _ = nextCaptureGeneration()
-        captureSession?.stopRunning()
+        frameRouter.setActiveOutput(nil)
+        // 锁内仅取出并置空指针(快)，stopRunning 放锁外，避免与 startCapture 互相阻塞。
+        sessionLock.lock()
+        let sessionToStop = captureSession
         captureSession = nil
         videoDevice = nil
         videoInput = nil
         videoOutput = nil
         activeCameraID = nil
+        sessionLock.unlock()
+        sessionToStop?.stopRunning()
         frameBuffer.clear()
-        
-        isCapturing = false
+
+        isCapturingInternal = false
         isStartingCapture = false
+        // @Published 更新派发到主执行器；闭包体为同步(无 await)，主执行器不跨 await 挂起，
+        // 故不触发 macOS 26.5.1 的执行器打乱缺陷。绝不使用 MainActor.assumeIsolated。
+        Task { @MainActor [weak self] in self?.isCapturing = false }
         print("✅ 摄像头捕获已停止")
     }
 
-    private func nextCaptureGeneration() -> UInt64 {
+    private nonisolated func nextCaptureGeneration() -> UInt64 {
+        sessionLock.lock(); defer { sessionLock.unlock() }
         captureGeneration &+= 1
         return captureGeneration
     }
@@ -266,8 +293,8 @@ class CameraManager: NSObject, ObservableObject {
         frameBuffer.dequeueLatest()
     }
 
-    func setRecordingFrameHandler(_ handler: ((CameraFrameSample) -> Void)?) {
-        recordingFrameHandler = handler
+    nonisolated func setRecordingFrameHandler(_ handler: (@Sendable (CameraFrameSample) -> Void)?) {
+        frameRouter.setHandler(handler)
     }
 
     var receivedFrameCount: UInt64 {
@@ -278,21 +305,31 @@ class CameraManager: NSObject, ObservableObject {
         frameBuffer.droppedCount
     }
 
+    // nonisolated 计数访问器：供后台写盘队列上的 nonisolated 消费者读取，
+    // frameBuffer 为 Sendable 的 nonisolated 类型，可安全跨线程读取。
+    nonisolated var receivedFrameCountValue: UInt64 {
+        frameBuffer.receivedCount
+    }
+
+    nonisolated var droppedFrameCountValue: Int {
+        frameBuffer.droppedCount
+    }
+
     var currentFrameAspectRatio: CGFloat? {
         frameBuffer.currentAspectRatio
     }
 
-    private func selectedCaptureDevice() -> AVCaptureDevice? {
+    private nonisolated func selectedCaptureDevice(selectedID: String) -> AVCaptureDevice? {
         let devices = discoverCaptureDevices()
 
-        if let device = devices.first(where: { $0.uniqueID == selectedCameraID }) {
+        if let device = devices.first(where: { $0.uniqueID == selectedID }) {
             return device
         }
 
         return devices.first(where: { $0.position == .front }) ?? devices.first
     }
 
-    private func discoverCaptureDevices() -> [AVCaptureDevice] {
+    private nonisolated func discoverCaptureDevices() -> [AVCaptureDevice] {
         let deviceTypes: [AVCaptureDevice.DeviceType]
 
         if #available(macOS 14.0, *) {
@@ -308,7 +345,7 @@ class CameraManager: NSObject, ObservableObject {
         ).devices
     }
 
-    private func configureNativeFraming(for device: AVCaptureDevice) {
+    private nonisolated func configureNativeFraming(for device: AVCaptureDevice) {
         if #available(macOS 12.3, *) {
             guard let bestFormat = preferredCenterStageFormat(for: device) else {
                 print("📷 Center Stage not supported on selected camera")
@@ -336,7 +373,7 @@ class CameraManager: NSObject, ObservableObject {
         }
     }
 
-    private func waitForFirstFrame(timeout: TimeInterval, generation: UInt64) async -> Bool {
+    private nonisolated func waitForFirstFrame(timeout: TimeInterval, generation: UInt64) async -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
             guard captureGeneration == generation else { return false }
@@ -349,7 +386,7 @@ class CameraManager: NSObject, ObservableObject {
     }
 
     @available(macOS 12.3, *)
-    private func preferredCenterStageFormat(for device: AVCaptureDevice) -> (format: AVCaptureDevice.Format, width: Int32, height: Int32, supports30FPS: Bool)? {
+    private nonisolated func preferredCenterStageFormat(for device: AVCaptureDevice) -> (format: AVCaptureDevice.Format, width: Int32, height: Int32, supports30FPS: Bool)? {
         let preferredAspectRatio: CGFloat = 16.0 / 9.0
         let targetPixels = 1920 * 1080
 
@@ -471,22 +508,57 @@ class CameraManager: NSObject, ObservableObject {
 
 // MARK: - AVCaptureVideoDataOutputSampleBufferDelegate
 extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
-    func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
+    nonisolated func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
         let timestamp = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
-        
-        // 更新当前帧
-        Task { @MainActor in
-            guard let currentOutput = videoOutput, output === currentOutput else { return }
 
-            let hasRecordingConsumer = recordingFrameHandler != nil
-            let frame = frameBuffer.push(
-                pixelBuffer: pixelBuffer,
-                timestamp: timestamp,
-                enqueue: !hasRecordingConsumer
-            )
-            recordingFrameHandler?(frame)
+        // 仅处理当前活动输出的帧（热切换时丢弃旧 session 的残帧）
+        let routing = frameRouter.route(for: ObjectIdentifier(output))
+        guard routing.isActive else { return }
+
+        // 关键修复：直接在采集队列写入线程安全缓冲。
+        // 预览阶段（无录制消费者）绝不每帧 Task{@MainActor}，避免持续向主执行器
+        // 灌任务把 MainActor 执行器引用搞坏（接 Studio Display 后点任意按钮即崩溃）。
+        let frame = frameBuffer.push(
+            pixelBuffer: pixelBuffer,
+            timestamp: timestamp,
+            enqueue: routing.handler == nil
+        )
+
+        // 仅在真正录制时把帧交给录制消费者。关键修复：直接在采集队列上同步回调，
+        // 既不创建并发 Task、也不用 DispatchQueue.main + MainActor.assumeIsolated。
+        // 二者都会每帧调用 swift_task_isCurrentExecutor（macOS 26 / Swift 6 已知缺陷
+        // 函数），高频敲打会冲坏主执行器追踪，导致之后任意 SwiftUI 按钮/下拉框点击
+        // 崩溃。消费者(ScreenRecorder.appendCameraFrame)已改为 nonisolated，在自己的
+        // 后台串行队列上写盘，无需跳主执行器。
+        if let handler = routing.handler {
+            handler(frame)
         }
+    }
+}
+
+/// 采集回调（nonisolated，运行在采集队列）与录制消费者之间的线程安全路由。
+/// 持有「当前活动输出」标识与录制帧回调，避免 nonisolated 回调直接读取
+/// `@MainActor` 隔离的 CameraManager 属性而产生数据竞争。
+nonisolated final class CameraFrameRouter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var handler: (@Sendable (CameraFrameSample) -> Void)?
+    private var activeOutputID: ObjectIdentifier?
+
+    func setHandler(_ handler: (@Sendable (CameraFrameSample) -> Void)?) {
+        lock.lock(); defer { lock.unlock() }
+        self.handler = handler
+    }
+
+    func setActiveOutput(_ id: ObjectIdentifier?) {
+        lock.lock(); defer { lock.unlock() }
+        self.activeOutputID = id
+    }
+
+    func route(for outputID: ObjectIdentifier) -> (isActive: Bool, handler: (@Sendable (CameraFrameSample) -> Void)?) {
+        lock.lock(); defer { lock.unlock() }
+        guard activeOutputID == outputID else { return (false, nil) }
+        return (true, handler)
     }
 }
 

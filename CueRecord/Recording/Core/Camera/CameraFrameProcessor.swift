@@ -3,7 +3,7 @@ import CoreImage
 import CoreVideo
 import Foundation
 
-enum CameraFrameProcessor {
+nonisolated enum CameraFrameProcessor {
     static func mirroredVisibleImage(from pixelBuffer: CVPixelBuffer) -> (image: CIImage, extent: CGRect) {
         let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
         let cropRect = visibleContentRect(in: pixelBuffer, imageExtent: ciImage.extent)

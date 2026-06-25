@@ -49,8 +49,17 @@ nonisolated struct CodableMetricsRect: Codable, Equatable, Sendable {
     }
 }
 
-@MainActor
-final class RecordingMetricsRecorder {
+// 线程安全的录制指标记录器：录制热路径在后台串行写盘队列上累加计数，
+// 配置/收尾在主线程，故内部用 NSLock 保护快照，标记 @unchecked Sendable。
+nonisolated final class RecordingMetricsRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+
+    private func withLock<T>(_ body: () -> T) -> T {
+        lock.lock()
+        defer { lock.unlock() }
+        return body()
+    }
+
     private var snapshot = RecordingMetricsSnapshot(
         version: 1,
         health: .healthy,
@@ -86,86 +95,92 @@ final class RecordingMetricsRecorder {
         outputHeight: Int,
         pixelFormat: OSType
     ) {
-        snapshot = RecordingMetricsSnapshot(
-            version: 1,
-            health: .healthy,
-            issues: [],
-            startedAt: ISO8601DateFormatter().string(from: Date()),
-            finishedAt: nil,
-            mode: mode,
-            targetDisplayID: displayID,
-            recordingRect: recordingRect.map(CodableMetricsRect.init),
-            outputWidth: outputWidth,
-            outputHeight: outputHeight,
-            pixelFormat: Self.fourCharCode(pixelFormat),
-            screenFramesAppended: 0,
-            screenFramesDroppedWriterNotReady: 0,
-            audioBuffersQueuedBeforeVideo: 0,
-            audioBuffersDroppedBeforeVideo: 0,
-            audioBuffersDroppedWriterNotReady: 0,
-            audioBuffersAppendFailed: 0,
-            partialAudioOverlapMilliseconds: 0,
-            cameraFramesReceived: 0,
-            cameraFramesWritten: 0,
-            cameraFramesDropped: 0,
-            outputFileBytes: nil,
-            outputDurationSeconds: nil,
-            exportDurationSeconds: nil
-        )
+        withLock {
+            snapshot = RecordingMetricsSnapshot(
+                version: 1,
+                health: .healthy,
+                issues: [],
+                startedAt: ISO8601DateFormatter().string(from: Date()),
+                finishedAt: nil,
+                mode: mode,
+                targetDisplayID: displayID,
+                recordingRect: recordingRect.map(CodableMetricsRect.init),
+                outputWidth: outputWidth,
+                outputHeight: outputHeight,
+                pixelFormat: Self.fourCharCode(pixelFormat),
+                screenFramesAppended: 0,
+                screenFramesDroppedWriterNotReady: 0,
+                audioBuffersQueuedBeforeVideo: 0,
+                audioBuffersDroppedBeforeVideo: 0,
+                audioBuffersDroppedWriterNotReady: 0,
+                audioBuffersAppendFailed: 0,
+                partialAudioOverlapMilliseconds: 0,
+                cameraFramesReceived: 0,
+                cameraFramesWritten: 0,
+                cameraFramesDropped: 0,
+                outputFileBytes: nil,
+                outputDurationSeconds: nil,
+                exportDurationSeconds: nil
+            )
+        }
     }
 
     func markFinished() {
-        snapshot.finishedAt = ISO8601DateFormatter().string(from: Date())
+        withLock { snapshot.finishedAt = ISO8601DateFormatter().string(from: Date()) }
     }
 
     func incrementScreenAppended() {
-        snapshot.screenFramesAppended += 1
+        withLock { snapshot.screenFramesAppended += 1 }
     }
 
     func incrementScreenWriterNotReady() {
-        snapshot.screenFramesDroppedWriterNotReady += 1
+        withLock { snapshot.screenFramesDroppedWriterNotReady += 1 }
     }
 
     func incrementQueuedAudioBeforeVideo() {
-        snapshot.audioBuffersQueuedBeforeVideo += 1
+        withLock { snapshot.audioBuffersQueuedBeforeVideo += 1 }
     }
 
     func incrementDroppedAudioBeforeVideo() {
-        snapshot.audioBuffersDroppedBeforeVideo += 1
+        withLock { snapshot.audioBuffersDroppedBeforeVideo += 1 }
     }
 
     func incrementAudioWriterNotReady() {
-        snapshot.audioBuffersDroppedWriterNotReady += 1
+        withLock { snapshot.audioBuffersDroppedWriterNotReady += 1 }
     }
 
     func incrementAudioAppendFailed() {
-        snapshot.audioBuffersAppendFailed += 1
+        withLock { snapshot.audioBuffersAppendFailed += 1 }
     }
 
     func addPartialAudioOverlap(_ duration: CMTime) {
         guard duration.isValid else { return }
-        snapshot.partialAudioOverlapMilliseconds += max(0, duration.seconds * 1000)
+        withLock { snapshot.partialAudioOverlapMilliseconds += max(0, duration.seconds * 1000) }
     }
 
     func updateCamera(received: UInt64, written: Int64, dropped: Int) {
-        snapshot.cameraFramesReceived = received
-        snapshot.cameraFramesWritten = written
-        snapshot.cameraFramesDropped = dropped
+        withLock {
+            snapshot.cameraFramesReceived = received
+            snapshot.cameraFramesWritten = written
+            snapshot.cameraFramesDropped = dropped
+        }
     }
 
     func applyValidation(_ validation: RecordingOutputValidation) {
-        snapshot.health = validation.health
-        snapshot.issues = validation.issues
-        snapshot.outputFileBytes = validation.fileSize
-        snapshot.outputDurationSeconds = validation.durationSeconds
+        withLock {
+            snapshot.health = validation.health
+            snapshot.issues = validation.issues
+            snapshot.outputFileBytes = validation.fileSize
+            snapshot.outputDurationSeconds = validation.durationSeconds
+        }
     }
 
     func setExportDuration(_ duration: TimeInterval) {
-        snapshot.exportDurationSeconds = duration
+        withLock { snapshot.exportDurationSeconds = duration }
     }
 
     func write(to outputURL: URL) {
-        var finalSnapshot = snapshot
+        var finalSnapshot = withLock { snapshot }
         if finalSnapshot.finishedAt == nil {
             finalSnapshot.finishedAt = ISO8601DateFormatter().string(from: Date())
         }
