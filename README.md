@@ -1,8 +1,15 @@
 # CueRecord
 
-CueRecord is a native macOS recording app for screen demos, tutorials, product walkthroughs, and teleprompter-assisted presentations.
+[![Latest release](https://img.shields.io/github/v/release/nolangz/CueRecord?label=release)](https://github.com/nolangz/CueRecord/releases/latest)
+[![macOS](https://img.shields.io/badge/platform-macOS-111111)](https://github.com/nolangz/CueRecord/releases/latest)
+[![Swift](https://img.shields.io/badge/Swift-FA7343?logo=swift&logoColor=white)](https://www.swift.org/)
+[![License](https://img.shields.io/github/license/nolangz/CueRecord)](LICENSE)
 
-It combines high-resolution screen recording, optional camera overlay, microphone/system audio capture, and a built-in teleprompter workflow in one desktop app.
+Native macOS screen recorder with teleprompter, camera overlay, system audio capture, 4K export, and AI breath cuts for product demos, tutorials, courses, and presentations.
+
+CueRecord combines high-resolution screen recording, optional camera overlay, microphone and system audio capture, AI-assisted script preparation, and a built-in teleprompter workflow in one desktop app.
+
+It is built for creators, educators, founders, and developers who need to record polished walkthrough videos without stitching together a separate screen recorder, teleprompter app, camera overlay tool, and audio capture setup.
 
 ## Nolan Lai
 
@@ -23,14 +30,25 @@ Download the latest signed and notarized macOS build:
 - [Download CueRecord-v2.0.2.dmg](https://github.com/nolangz/CueRecord/releases/download/v2.0.2/CueRecord-v2.0.2.dmg)
 - [Release notes](https://github.com/nolangz/CueRecord/releases/tag/v2.0.2)
 
+## Use Cases
+
+- Product demo videos and SaaS walkthroughs
+- Tutorial, course, and training recordings
+- Founder updates, launch videos, and pitch recordings
+- Developer demos with screen, camera, voice, and system audio
+- Scripted presentations that need a teleprompter while recording
+
 ## Features
 
-- High-resolution screen recording for full screen, window, and selected-area workflows
+- Native Swift macOS app for full-screen, window, and selected-area recording
 - Multi-display support, including external display selection
 - Optional camera overlay with draggable preview window
 - Microphone and system audio capture
 - Single-track mixed audio output in the final composited recording
 - Built-in teleprompter with adjustable line count and follow-along behavior
+- AI Breath Cuts for adding natural teleprompter line breaks with OpenAI-compatible models
+- PowerPoint/PPTX speaker-note import for presentation scripts
+- Export resolution presets up to 4K with visible expected output dimensions
 - Minimal export progress in the project sidebar
 - Raw recording assets organized under `raw_data/` while the final composited movie stays in the project folder
 - Developer ID signed, notarized, and stapled DMG for distribution
@@ -129,6 +147,7 @@ build.sh                  Signed, notarized release DMG build script
 - Final exported recordings are designed to contain a single mixed audio track.
 - Intermediate screen, camera, overlay metadata, and metrics files are kept under `raw_data/`.
 - Large bundled assets are tracked with Git LFS and are required for a complete local build.
+- Related search terms: macOS screen recorder, teleprompter app, camera overlay recorder, system audio recorder, product demo recorder, tutorial video recorder, 4K screen recording, OpenAI-compatible script editing.
 
 ## License
 
